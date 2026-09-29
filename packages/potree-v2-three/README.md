@@ -1,0 +1,131 @@
+# @geemil/potree-v2-three
+
+PotreeConverter **2.0** の `metadata.json`, `hierarchy.bin`, `octree.bin` を Three.js で表示するライブラリです。Potree v1 と Potree-Next v3 は対象外です。
+
+## 使い方
+
+```ts
+import { loadPotreeV2 } from '@geemil/potree-v2-three';
+
+const cloud = await loadPotreeV2('/pointcloud/metadata.json', {
+  pointBudget: 2_000_000,
+  onError: (error, node) => console.error(node, error),
+});
+scene.add(cloud.group);
+
+function render() {
+  requestAnimationFrame(render);
+  cloud.update(camera, renderer.domElement.clientHeight);
+  renderer.render(scene, camera);
+}
+render();
+
+// When the cloud is no longer needed:
+scene.remove(cloud.group);
+cloud.dispose();
+```
+
+`cloud.group` は座標を点群の bounding box の最小値で平行移動したローカル座標で表示します。元の座標は `cloud.worldOffset` にあります。大きな地理座標をそのまま `group.position` に設定すると GPU の精度が落ちるため、アプリ側で扱いを決めてください。
+
+`cloud.update()` はカメラと表示領域の高さから必要な階層を選び、近接するノードをまとめて HTTP Range で非同期に読み込みます。戻り値は、ノードの追加・表示切り替え・破棄でシーンが変わったときに `true` になります。カメラ・点群の行列、表示領域の高さ、`pointBudget`、`cachePointBudget`、`minNodePixelSize`、`showBoundingBoxes` が前回と同じで、選ばれたノードがすべてシーンに追加され、読み込み中の処理がない間は、階層の走査を省略して `false` を返します。静止中は、戻り値とカメラ操作を見て描画を省略できます。
+
+```ts
+let needsRender = true;
+function render() {
+  requestAnimationFrame(render);
+  if (controls.update()) needsRender = true;
+  if (cloud.update(camera, renderer.domElement.clientHeight)) needsRender = true;
+  if (needsRender) {
+    needsRender = false;
+    renderer.render(scene, camera);
+  }
+}
+```
+
+同時に行う HTTP リクエスト（階層チャンクと octree の取得）は `maxConcurrentLoads`（初期値 6）、デコード用の Worker 数は `decoderWorkers`（初期値は論理コア数 - 1、1〜4）で指定します。Worker は全点群で 1 つのプールを共有し、生きている点群が指定した最大の数まで増えます。最後の点群を `dispose()` すると終了します。取得を終えたバッチはすぐにリクエストの枠を空けるので、Worker がデコードしている間も次のノードを取得できます。デコード待ちのバッチは共有プール全体で Worker 数の 2 倍までに抑えます。サーバーは 3 ファイルにアクセス可能で、Range リクエストと CORS（別オリジンの場合）に対応させてください。`hierarchy.bin` と `octree.bin` の取得は HTTP 206 だけを受け付けます。Range を無視して 200 でファイル全体を返すサーバーはエラーになり、その時点で受信を打ち切ります。レスポンスの長さは `Content-Length` に頼らず、ボディを読みながら要求したバイト数と一致するかを確かめるので、chunked 転送や圧縮されたレスポンスでも要求サイズを超えて読み込みません。別オリジンで `Content-Range` を検証させたい場合は、`Access-Control-Expose-Headers: Content-Range` で公開してください（公開されていなければ検証を省略します）。
+
+ノードは画面上の投影半径が大きい順に選び、`pointBudget` に収まらないノードに当たった時点で選択を終えます（公式 Potree と同じです）。視錐台の外にある子ノードは候補に加えません。取得中のバッチに含まれるノードがどれも 300 ms 以上選ばれなかった場合は、視点が移ったものとしてそのリクエストを中断します（`loadDiagnostics.abortedRequests`）。中断したノードは、再び選ばれたときに取得し直します。
+
+子ノードは画面上の投影半径が `minNodePixelSize` 以上の場合に探索します。既定値は公式 Potree Viewer と同じ 30 px です。値を変えると次の `update()` から反映されます。
+
+復号後に描画へ追加するノード数は `maxNodesToGPUPerFrame` で制御できます（初期値 8）。`cloud.maxNodesToGPUPerFrame` を変更すると次の `update()` から反映されます。
+
+ノードや階層チャンクの読み込みに失敗すると `onError` が呼ばれ、`retryDelayMs`（初期値 1000）後の `update()` で再試行されます。待ち時間は失敗のたびに倍になり、最大 30 秒です。読み込みに成功すると元に戻ります。
+
+HTTP 429（Too Many Requests）と 503（Service Unavailable）は、ノードの失敗ではなくサーバーからの「控えてほしい」という合図として扱います。同じオリジンへのリクエストは、複数の点群をまたいで1つの窓口で管理します。429 か 503 を受けると、そのオリジンへの新しいリクエストをすべて止めます（実行中のリクエストは完了を待ちます）。再開までの時間は `Retry-After` があればその値（最大 5 分）、なければ `retryDelayMs` から倍々に延ばします（最大 30 秒）。同時に同時実行数の上限を半分に下げ、成功が続くと 1 ずつ戻します。止めている間に取得できなかったノードは、再開後の `update()` がその時点の視点で選び直して取得します。この場合 `onError` は呼ばれず、ノードごとの再試行の待ち時間も増えません。回数は `loadDiagnostics.throttledResponses` で確認できます。`loadPotreeV2()` 中の `metadata.json`、最初の階層チャンク、ルートノードの取得も、429・503 なら待ってから再試行します（最大 6 回）。別オリジンで `Retry-After` を使わせるには、サーバーで `Access-Control-Expose-Headers: Retry-After` を設定してください。また、CDN が 429 のレスポンスに CORS ヘッダーを付けないと、ブラウザはステータスを見せずにネットワークエラーとして扱うため、通常の失敗として `onError` と再試行の対象になります。
+
+HTTP のエラーは `HttpError`（`status` と `retryAfterMs` を持ちます）として `onError` に渡されるので、404 などの内容に応じて処理を分けられます。
+
+キャッシュは二段階です。復号済みジオメトリは、表示中の `pointBudget` の2倍の点数まで保持し、超過時に非表示ノードを古い順に破棄します。この上限は `pointBudget` の変更に追従し、`cachePointBudget` で固定値に上書きできます。BROTLI の URL データは、復号前のノードも LRU で最大 128 MiB 保持します。上限は `encodedCacheByteBudget`（バイト数）で変更でき、`0` で無効になります。UNCOMPRESSED データとローカルファイルは初期状態では復号前のキャッシュを使いません。復号前のキャッシュに残っているノードは再取得せず、Worker で再デコードします。
+
+`cloud.fetchStats` で成功した octree Range 取得回数 (`rangeRequests`) と取得ノード数 (`fetchedNodes`) を参照できます。復号前キャッシュからの再デコードは含みません。`cloud.clearFetchStats()` で両方を 0 に戻せます。クリア時点で進行中だった取得は、新しいカウントに含めません。
+
+BROTLI は google/brotli 1.2.0 の decode-only WASM で復号します。Worker と WASM は点群の読み込み中（最初の hierarchy を取得している間）に全 Worker で準備され、JS ファイルに埋め込まれているため別の `.wasm` 配布は不要です。
+
+`cloud.loadDiagnostics` は現在の視点で必要なノードの復号完了と表示完了、バッチ数、取得・復号の時間を返します。`cloud.resetLoadDiagnostics()` で計測を開始し直せます。`brotliMs` は純粋な Brotli 展開時間、`attributesMs` は展開後の属性デコード時間、`codecSetupMs` は各 Worker での初回準備時間の合計です。これらの時間は並列 Worker の処理時間の合計なので、表示完了までの経過時間とは一致しません。表示完了は選択された全ノードをシーンへ追加した時刻で、500 ms 安定すると状態が `complete` になります。
+
+`showBoundingBoxes: true` を指定すると表示中のノードの bbox を描画します。`cloud.showBoundingBoxes` の変更も次の `update()` から反映されます（初期値は `false`）。
+
+複数の点群を表示するときは `PotreeV2PointCloudSet` で点数予算・復号済みキャッシュ・同時リクエスト数・1 フレームの追加ノード数を共有できます。全点群をまとめて投影サイズの大きいノードから選び、取得と描画への追加もその順に行うので、これらの上限は点群の数に関係なく一定です。キャッシュも全点群で最近表示していないノードから解放します（本家 Potree の `Potree.pointBudget` と同じ考え方です）。オプションは `pointBudget`、`cachePointBudget`、`maxConcurrentLoads`、`maxNodesToGPUPerFrame` で、初期値は点群単体と同じです。セットに入れた点群の同名の設定は使われず、`cloud.update()` を呼ぶとエラーになります。`minNodePixelSize` や `showBoundingBoxes` は点群ごとの設定がそのまま効きます。
+
+```ts
+const clouds = new PotreeV2PointCloudSet({ pointBudget: 3_000_000 });
+for (const cloud of [a, b]) {
+  clouds.add(cloud);
+  scene.add(cloud.group);
+}
+// 描画ループで毎フレーム
+if (clouds.update(camera, canvas.clientHeight)) renderer.render(scene, camera);
+```
+
+`clouds.remove(cloud)` で外すと、その点群は再び自分の予算で `cloud.update()` できます。`cloud.dispose()` するとセットからも外れます。
+
+`cloud.pick(renderer, camera, x, y)` は、キャンバス左上からの CSS ピクセル座標 `x`, `y` に描画されている点を返します（なければ `null`）。対象は直前の `update()` で表示したノードです。カーソル周辺だけをノード番号と点番号（`gl_VertexID`）の整数レンダーターゲットに描画し、GPU の完了を待たずに非同期で読み取るので、ピック用の頂点属性は持ちません。点のサイズと形は表示と同じなので、画面上で点が描かれているピクセルだけが当たります。`radius`（CSS px、初期値 0）を指定すると、その距離内で最も近い点を返します。属性値は CPU 側に保持している復号済みの配列から読みます。
+
+```ts
+canvas.addEventListener('pointermove', async event => {
+  const hit = await cloud.pick(renderer, camera, event.offsetX, event.offsetY, { radius: 2 });
+  if (hit) console.log(hit.node, hit.index, hit.sourcePosition, hit.attributes);
+});
+```
+
+結果の `position` は `cloud.group` の変換を含むワールド座標、`sourcePosition` は metadata.json の座標系、`attributes` は復号した `position` 以外の属性（`rgb` は 0〜255）です。カメラに `setViewOffset` を設定している場合には対応していません。
+
+認証付きの取得には `fetch` を差し替えます。この関数は metadata、hierarchy、octree のすべての取得に使われます。Range ヘッダーと `signal` を維持し、hierarchy と octree には要求した範囲を HTTP 206 で返してください。
+
+```ts
+const cloud = await loadPotreeV2('/pointcloud/metadata.json', {
+  fetch: (input, init) => {
+    const headers = new Headers(init?.headers);
+    headers.set('Authorization', `Bearer ${getAccessToken()}`);
+    return fetch(input, { ...init, headers });
+  },
+});
+```
+
+ローカルファイルから読み込む場合は、ファイル選択で得た `FileList` を渡します。`metadata.json`、`hierarchy.bin`、`octree.bin` をまとめて選び、バイナリファイルは `Blob.slice()` で必要な範囲だけ読みます。
+
+```ts
+import { loadPotreeV2FromFiles } from '@geemil/potree-v2-three';
+
+const input = document.querySelector<HTMLInputElement>('#files-input')!;
+// <input id="files-input" type="file" accept=".json,.bin" multiple>
+const cloud = await loadPotreeV2FromFiles(input.files!);
+scene.add(cloud.group);
+```
+
+初期状態では `position` と `rgb`（metadata にある場合）だけを復号し、GPU に送ります。ほかの属性を独自のマテリアルなどで使う場合は、`attributes` オプションで復号する属性名を指定します。この指定は初期値を置き換えるので、色も必要なら `rgb` を含めてください。`position` は常に復号します。metadata にない名前を指定すると読み込みはエラーになります。
+
+```ts
+const cloud = await loadPotreeV2('/pointcloud/metadata.json', {
+  attributes: ['rgb', 'intensity', 'classification'],
+});
+```
+
+各ノードの `Points` は `position` をノードの bounding box の最小値に置き、`position` attribute はそこからの相対座標（float32）で持ちます。大きな平行移動は double 精度の行列側で打ち消されるので、ノードが細かくなるほど座標の精度が上がります。独自のシェーダーでは `modelMatrix` を通して座標を扱ってください。`rgb` は `color` attribute（`Uint8` の RGBA、正規化、alpha は常に 255）に格納し、点色として表示します。Potree の RGB 値は sRGB として扱い、シェーダー内で線形色へ変換してから Three.js の出力色変換に渡します。`rgb` と `position` 以外で指定した属性は `BufferGeometry` の同名 attribute に格納します。64-bit の単一値属性は GPU の float 精度に合わせて metadata の min/max で 0～1 に正規化します。
+
+`metadata.json`、`hierarchy.bin`、`octree.bin` の取得はメインスレッドで行います。認証や独自の通信処理が必要なら `fetch` オプションで差し替えられます。近接するノードは1回の Range リクエストにまとめ、取得した `ArrayBuffer` をコピーせず Worker に転送します。Worker プールが Brotli 展開と点属性の復号を行い、描画側でジオメトリを組み立てます。ローカルファイルはメインスレッドで `Blob.slice()` から読みます。Web Worker が利用できない環境ではメインスレッドで復号します。
+
+## 開発
+
+リポジトリのルートで `pnpm install`, `pnpm dev` を実行するとライブラリの watch ビルドと playground が起動します。`pnpm build` で両方をビルド、`pnpm test` で形式の読み込みを検証します。

@@ -16,7 +16,8 @@
 				"Anthropic.claude-code"
 			]
 		}
-	}
+	},
+	"forwardPorts": [5173]
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},

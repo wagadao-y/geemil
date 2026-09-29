@@ -1,0 +1,27 @@
+{
+  "name": "@geemil/potree-v2-three",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Potree 2.0 point cloud loader and renderer for Three.js",
+  "license": "Apache-2.0",
+  "files": ["dist", "README.md", "LICENSE", "THIRD_PARTY_LICENSES.txt"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "peerDependencies": {
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.180.0",
+    "three": "^0.180.0",
+    "typescript": "~6.0.2"
+  }
+}
