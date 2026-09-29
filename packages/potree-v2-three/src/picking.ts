@@ -4,11 +4,15 @@ import {
 } from 'three';
 import type { Camera, OrthographicCamera, PerspectiveCamera, WebGLRenderer } from 'three';
 import type { OctreeNode } from './format.js';
+import { ClipUniforms, clipVertex, clipVertexPars } from './clipping.js';
+import type { ClipCapacity, NodeClip } from './clipping.js';
 
 /** A displayed node that can be hit by a pick. */
 export interface PickTarget {
   node: OctreeNode;
   points: Points;
+  /** The node's clips, applied exactly as when it is drawn. */
+  clip: NodeClip;
 }
 
 export interface PickHit {
@@ -21,12 +25,14 @@ export interface PickHit {
 
 const vertexShader = /* glsl */`
 uniform float size;
+${clipVertexPars}
 flat out highp uint vIndex;
 void main() {
   // Each node is one non-indexed Points object drawn from vertex 0, so the
   // vertex ID is the index into the node's attribute arrays.
   vIndex = uint(gl_VertexID);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  ${clipVertex}
   gl_PointSize = size;
 }`;
 
@@ -60,10 +66,12 @@ async function waitForSync(gl: WebGL2RenderingContext, sync: WebGLSync): Promise
  * them back through a pixel pack buffer, so the caller never stalls on the GPU.
  */
 export class PointPicker {
+  private readonly clip = new ClipUniforms();
   private readonly material = new ShaderMaterial({
     glslVersion: GLSL3,
     vertexShader, fragmentShader,
-    uniforms: { size: { value: 1 }, nodeId: { value: 0 } },
+    uniforms: { size: { value: 1 }, nodeId: { value: 0 }, ...this.clip.uniforms },
+    defines: this.clip.defines,
   });
   // RGBA_INTEGER/UNSIGNED_INT is the read format WebGL2 guarantees for unsigned
   // integer attachments, so the readback does not depend on implementation formats.
@@ -74,6 +82,8 @@ export class PointPicker {
   private readonly scene = new Scene();
   /** Reused stand-ins that draw node geometries with the ID material; proxy i writes ID i + 1. */
   private readonly proxies: Points<BufferGeometry, ShaderMaterial>[] = [];
+  /** The target each proxy draws in the current pick. */
+  private readonly proxyTargets: PickTarget[] = [];
   private readonly frustum = new Frustum();
   private readonly projection = new Matrix4();
   private readonly drawingBuffer = new Vector2();
@@ -87,12 +97,17 @@ export class PointPicker {
   /**
    * `x`, `y` are CSS pixels from the canvas' top-left corner, and `pointSize` and
    * `radius` are CSS pixels too. With radius 0 only a point drawn under that pixel hits.
+   * `clipCapacity` is the display material's, so both compile the same clip test.
    */
   async pick(
     renderer: WebGLRenderer, camera: Camera, targets: PickTarget[], groupMatrix: Matrix4,
-    x: number, y: number, pointSize: number, radius: number,
+    x: number, y: number, pointSize: number, radius: number, clipCapacity: ClipCapacity,
   ): Promise<PickHit | null> {
     if (targets.length === 0 || !isPickCamera(camera)) return null;
+    if (this.clip.resize(clipCapacity)) {
+      this.material.defines = { ...this.material.defines, ...this.clip.defines };
+      this.material.needsUpdate = true;
+    }
     const gl = renderer.getContext();
     if (!(gl instanceof WebGL2RenderingContext) || gl.isContextLost()) return null;
     const pixelRatio = renderer.getPixelRatio();
@@ -135,6 +150,7 @@ export class PointPicker {
       const proxy = this.proxy(drawn.length);
       proxy.geometry = target.points.geometry;
       proxy.matrixWorld.multiplyMatrices(groupMatrix, target.points.matrix);
+      this.proxyTargets[drawn.length] = target;
       this.scene.add(proxy);
       drawn.push(target);
     }
@@ -168,6 +184,7 @@ export class PointPicker {
       renderer.setClearColor(previousClearColor, previousClearAlpha);
       renderer.setRenderTarget(previousTarget);
       this.scene.clear();
+      this.proxyTargets.length = 0;
     }
 
     try {
@@ -208,8 +225,10 @@ export class PointPicker {
       proxy.matrixAutoUpdate = false;
       proxy.frustumCulled = false;
       const id = index + 1;
-      // All proxies share one material, so the node ID uniform must be re-uploaded per object.
+      // All proxies share one material, so the node ID and clip uniforms must be re-uploaded per object.
       proxy.onBeforeRender = () => {
+        const target = this.proxyTargets[index]!;
+        this.clip.write(target.clip, target.node.box.min);
         this.material.uniforms.nodeId!.value = id;
         this.material.uniformsNeedUpdate = true;
       };

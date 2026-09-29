@@ -1,9 +1,13 @@
 import './style.css'
 import {
-  loadPotreeV2, loadPotreeV2FromFiles, selectPotreeV2Files, type PotreeV2PickResult, type PotreeV2PointCloud,
+  loadPotreeV2, loadPotreeV2FromFiles, PotreeV2Clipping, selectPotreeV2Files,
+  type PotreeV2ClipBoxMode, type PotreeV2PickResult, type PotreeV2PointCloud,
 } from '@geemil/potree-v2-three'
 import GUI from 'lil-gui'
-import { PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three'
+import {
+  BoxGeometry, EdgesGeometry, Euler, LineBasicMaterial, LineSegments, Matrix4, PerspectiveCamera, Plane, Quaternion,
+  Scene, Vector3, WebGLRenderer,
+} from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RenderProfiler } from './perf'
 
@@ -36,6 +40,21 @@ const info = {
   encoding: '—',
   projection: '—',
   attributes: '—',
+}
+// Box centre and size are fractions of the cloud's bounding box; the plane offset too.
+const clipSettings = {
+  boxEnabled: false,
+  boxMode: 'hide-inside' as PotreeV2ClipBoxMode,
+  boxPrune: true,
+  showBox: true,
+  centerX: 0.5, centerY: 0.5, centerZ: 0.5,
+  sizeX: 0.5, sizeY: 0.5, sizeZ: 0.5,
+  rotationZ: 0,
+  planeEnabled: false,
+  planeAxis: 'z' as 'x' | 'y' | 'z',
+  planeOffset: 0.5,
+  planeFlip: false,
+  planePrune: true,
 }
 const performanceStats = { fps: '—', frameMs: '—', cpuMs: '—', gpuMs: '—', drawCalls: '—', points: '—' }
 const picked = { node: '—', index: '—', position: '—', attributes: '—' }
@@ -103,6 +122,30 @@ appearanceFolder.add(settings, 'maxNodesToGPUPerFrame', [1, 2, 4, 8, 16, 32, 64]
 appearanceFolder.add(settings, 'showBoundingBoxes').name('ノードの bbox を表示').onChange((value: boolean) => {
   if (cloud) cloud.showBoundingBoxes = value
 })
+const clipFolder = gui.addFolder('クリッピング')
+const boxFolder = clipFolder.addFolder('ボックス')
+boxFolder.add(clipSettings, 'boxEnabled').name('有効')
+boxFolder.add(clipSettings, 'boxMode', { '内側を消す': 'hide-inside', '内側だけ残す': 'keep-inside' }).name('モード')
+boxFolder.add(clipSettings, 'boxPrune').name('範囲外ノードを読まない')
+boxFolder.add(clipSettings, 'showBox').name('枠を表示')
+for (const axis of ['X', 'Y', 'Z'] as const) {
+  boxFolder.add(clipSettings, `center${axis}`, -0.25, 1.25, 0.005).name(`中心 ${axis}`)
+}
+for (const axis of ['X', 'Y', 'Z'] as const) {
+  boxFolder.add(clipSettings, `size${axis}`, 0.01, 1.5, 0.005).name(`サイズ ${axis}`)
+}
+boxFolder.add(clipSettings, 'rotationZ', -180, 180, 1).name('Z 軸回転 (°)')
+const planeFolder = clipFolder.addFolder('平面')
+planeFolder.add(clipSettings, 'planeEnabled').name('有効')
+planeFolder.add(clipSettings, 'planeAxis', ['x', 'y', 'z']).name('法線の軸')
+planeFolder.add(clipSettings, 'planeOffset', 0, 1, 0.005).name('位置')
+planeFolder.add(clipSettings, 'planeFlip').name('残す側を反転')
+planeFolder.add(clipSettings, 'planePrune').name('範囲外ノードを読まない')
+clipFolder.onChange(() => {
+  applyClipping()
+  requestRender()
+})
+clipFolder.close()
 const pickFolder = gui.addFolder('ピック')
 pickFolder.add(settings, 'hoverPick').name('カーソル位置の点を表示').onChange((value: boolean) => {
   if (value) pickRequested = true
@@ -192,6 +235,16 @@ const profiler = new RenderProfiler(renderer)
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.enableDamping = true
 
+// One clipping shared by every cloud loaded in this page; the library notices edits on update().
+const clipping = new PotreeV2Clipping()
+const clipBox = clipping.addBox({ matrix: new Matrix4(), mode: clipSettings.boxMode, enabled: false })
+const clipPlane = clipping.addPlane({ plane: new Plane(new Vector3(0, 0, 1), 0), enabled: false })
+const edges = new EdgesGeometry(new BoxGeometry(1, 1, 1))
+const clipBoxHelper = new LineSegments(edges, new LineBasicMaterial({ color: 0xffb347, toneMapped: false }))
+clipBoxHelper.matrixAutoUpdate = false
+clipBoxHelper.visible = false
+scene.add(clipBoxHelper)
+
 let cloud: PotreeV2PointCloud | undefined
 let currentLoader: (() => Promise<PotreeV2PointCloud>) | undefined
 let currentSource = '—'
@@ -215,6 +268,28 @@ function requestRender() {
 function setStatus(message: string, error = false) {
   status.textContent = message
   status.dataset.error = String(error)
+}
+
+/** Place the box and plane relative to the loaded cloud's bounds, in its group's local space. */
+function applyClipping() {
+  const bounds = cloud?.metadata.boundingBox
+  const extent = bounds ? new Vector3(...bounds.max).sub(new Vector3(...bounds.min)) : new Vector3(1, 1, 1)
+  const c = clipSettings
+  const center = new Vector3(c.centerX, c.centerY, c.centerZ).multiply(extent)
+  const size = new Vector3(c.sizeX, c.sizeY, c.sizeZ).multiply(extent)
+  const rotation = new Quaternion().setFromEuler(new Euler(0, 0, c.rotationZ * Math.PI / 180))
+  clipBox.matrix.compose(center, rotation, size)
+  clipBox.mode = c.boxMode
+  clipBox.prune = c.boxPrune
+  clipBox.enabled = c.boxEnabled && cloud !== undefined
+  clipBoxHelper.matrix.copy(clipBox.matrix)
+  clipBoxHelper.visible = clipBox.enabled && c.showBox
+  const axis = { x: 0, y: 1, z: 2 }[c.planeAxis]
+  const normal = new Vector3().setComponent(axis, c.planeFlip ? -1 : 1)
+  // Keeps the side the normal points to, from `planeOffset` of the extent along the axis.
+  clipPlane.plane.setFromNormalAndCoplanarPoint(normal, new Vector3().setComponent(axis, c.planeOffset * extent.getComponent(axis)))
+  clipPlane.prune = c.planePrune
+  clipPlane.enabled = c.planeEnabled && cloud !== undefined
 }
 
 function fitCloud(next: PotreeV2PointCloud) {
@@ -327,6 +402,7 @@ async function openCloud(loader: () => Promise<PotreeV2PointCloud>, source: stri
     updateTiming()
     scene.add(next.group)
     fitCloud(next)
+    applyClipping()
     requestRender()
     updateInfo(next, source)
     setStatus('読み込み完了。視点を動かすと詳細を追加で読み込みます。')
@@ -343,6 +419,7 @@ function loadOptions() {
     minNodePixelSize: settings.minNodePixelSize,
     maxNodesToGPUPerFrame: settings.maxNodesToGPUPerFrame,
     showBoundingBoxes: settings.showBoundingBoxes,
+    clipping,
     onError: (error: Error, node: string) => setStatus(`${node}: ${error.message}`, true),
   }
 }
@@ -424,6 +501,7 @@ window.addEventListener('beforeunload', () => {
   cancelAnimationFrame(frame)
   resize.disconnect()
   cloud?.dispose()
+  edges.dispose()
   controls.dispose()
   profiler.dispose()
   renderer.dispose()

@@ -248,9 +248,9 @@ test('loads metadata, hierarchy and root through HTTP ranges', async () => {
   cloud.pointBudget = 2_000_000;
   assert.equal(cloud.group.children.length, 1);
   assert.equal(cloud.worldOffset.x, 100);
-  const shader = { vertexShader: '#include <color_vertex>', fragmentShader: '' };
-  cloud.material.onBeforeCompile(shader);
-  assert.match(shader.vertexShader, /lessThanEqual\(vColor\.rgb, vec3\(0\.04045\)\)/);
+  assert.match(cloud.material.vertexShader, /lessThanEqual\(vColor\.rgb, vec3\(0\.04045\)\)/);
+  assert.equal(cloud.material.vertexColors, true);
+  assert.equal(cloud.material.size, 2);
   const camera = new PerspectiveCamera(60, 1, 0.1, 100);
   camera.position.set(4, 4, 20);
   camera.lookAt(4, 4, 4);

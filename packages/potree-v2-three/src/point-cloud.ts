@@ -1,7 +1,7 @@
 import {
   BoxGeometry, Camera, EdgesGeometry, Frustum, Group, LineBasicMaterial,
   LineSegments, Matrix4, Object3D, OrthographicCamera, PerspectiveCamera,
-  Points, PointsMaterial, Sphere, Vector3,
+  Points, Sphere, Vector3,
 } from 'three';
 import type { WebGLRenderer } from 'three';
 import { createNodeGeometry, DEFAULT_DECODED_ATTRIBUTES, nodeOrigin } from './decode.js';
@@ -17,6 +17,11 @@ import { fetchRange, responseError } from './http.js';
 import { isThrottled, RequestGate } from './request-gate.js';
 import { PointPicker } from './picking.js';
 import type { PickHit, PickTarget } from './picking.js';
+import { PotreeV2PointMaterial } from './material.js';
+import {
+  appendClippingKey, clipBoxCount, clipNode, grownCapacity, NO_CLIP, sameKey, snapshotClipping,
+} from './clipping.js';
+import type { ClipSnapshot, NodeClip, PotreeV2Clipping } from './clipping.js';
 
 export interface PotreeV2Options {
   /** Maximum points selected for display per update. Default: 2,000,000. Unused in a PotreeV2PointCloudSet. */
@@ -43,6 +48,8 @@ export interface PotreeV2Options {
   pointSize?: number;
   /** Show boxes around currently displayed nodes. Default: false. */
   showBoundingBoxes?: boolean;
+  /** Clip boxes and planes; one PotreeV2Clipping can be shared by several clouds. Default: null. */
+  clipping?: PotreeV2Clipping | null;
   /**
    * metadata.json attribute names to decode and upload as geometry attributes.
    * `position` is always decoded. Default: `['position', 'rgb']` (rgb only when present).
@@ -177,13 +184,15 @@ function resolveDecodedAttributes(metadata: PotreeV2Metadata, requested?: string
 /** One cloud's part of an update that may traverse several clouds together. */
 type Traversal = {
   cloud: PotreeV2PointCloud;
+  /** Enabled clips at this update; undefined when nothing is clipped. */
+  clip?: ClipSnapshot;
   selected: Set<OctreeNode>;
   pending: OctreeNode[];
   hierarchyPending: number;
   sceneReady: boolean;
 };
 
-type Candidate = { node: OctreeNode; pixels: number; traversal: Traversal };
+type Candidate = { node: OctreeNode; pixels: number; traversal: Traversal; clip: NodeClip };
 
 /** Incremented by every traversing update, shared by all clouds so their LRU orders compare. */
 let displayStamp = 0;
@@ -268,7 +277,7 @@ export class PotreeV2PointCloud {
   readonly root: OctreeNode;
   readonly metadata: PotreeV2Metadata;
   readonly worldOffset: Vector3;
-  readonly material: PointsMaterial;
+  readonly material: PotreeV2PointMaterial;
 
   pointBudget: number;
   private cachePointBudgetOverride?: number;
@@ -276,6 +285,8 @@ export class PotreeV2PointCloud {
   maxConcurrentLoads: number;
   maxNodesToGPUPerFrame: number;
   showBoundingBoxes: boolean;
+  /** Clip boxes and planes applied to drawing, picking and node selection from the next update(). */
+  clipping: PotreeV2Clipping | null;
   retryDelayMs: number;
   onError?: (error: Error, node: string) => void;
 
@@ -309,6 +320,14 @@ export class PotreeV2PointCloud {
   private lastCachePointBudget = NaN;
   private lastMinNodePixelSize = NaN;
   private lastShowBoundingBoxes = false;
+  private lastClipping: PotreeV2Clipping | null = null;
+  /** Clip state of the last traversal, compared to decide whether to traverse again. */
+  private lastClipKey: number[] = [];
+  private clipKey: number[] = [];
+  /** Clips changed at this update, so the shaders draw differently even if no node does. */
+  private clipChanged = false;
+  /** Clips of the nodes selected by the last traversal; nodes without clips are absent. */
+  private nodeClips = new Map<OctreeNode, NodeClip>();
   /** Every selected node is in the scene and no load or installation is pending. */
   private settled = false;
   /** Scratch objects reused by every traversal. */
@@ -349,6 +368,7 @@ export class PotreeV2PointCloud {
     this.decoderWorkers = Math.max(1, Math.floor(options.decoderWorkers ?? defaultDecoderWorkers()));
     this.maxNodesToGPUPerFrame = Math.max(1, Math.floor(options.maxNodesToGPUPerFrame ?? 8));
     this.showBoundingBoxes = options.showBoundingBoxes ?? false;
+    this.clipping = options.clipping ?? null;
     this.retryDelayMs = Math.max(0, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS);
     this.gate = RequestGate.for(url);
     this.decoder = DecoderPool.acquire(this.decoderWorkers);
@@ -363,28 +383,9 @@ export class PotreeV2PointCloud {
       color: 0x58dfd2, toneMapped: false, depthTest: true, depthWrite: true,
     });
     this.onError = options.onError;
-    this.material = new PointsMaterial({
-      color: 0xffffff, size: options.pointSize ?? 2, sizeAttenuation: false,
-      vertexColors: this.decodedAttributes.includes('rgb'),
+    this.material = new PotreeV2PointMaterial({
+      size: options.pointSize ?? 2, vertexColors: this.decodedAttributes.includes('rgb'),
     });
-    if (this.material.vertexColors) {
-      // Potree's RGB bytes are display-encoded colors. Three.js expects linear
-      // vertex colors and applies an sRGB output transform, which would brighten
-      // the points unless the bytes are decoded before that transform.
-      this.material.onBeforeCompile = shader => {
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <color_vertex>',
-          `#include <color_vertex>
-#ifdef USE_COLOR
-  vColor.rgb = mix(
-    pow(vColor.rgb * 0.9478672986 + vec3(0.0521327014), vec3(2.4)),
-    vColor.rgb * 0.0773993808,
-    lessThanEqual(vColor.rgb, vec3(0.04045))
-  );
-#endif`,
-        );
-      };
-    }
     this.group.name = metadata.name ?? 'Potree v2 point cloud';
   }
 
@@ -667,6 +668,8 @@ export class PotreeV2PointCloud {
     points.updateMatrix();
     points.visible = false;
     points.frustumCulled = false;
+    // Every node draws with the shared material, so its clips are uploaded right before its draw.
+    points.onBeforeRender = () => this.material.setNodeClip(this.nodeClips.get(node) ?? NO_CLIP, node.box.min);
     this.group.add(points);
     const state = this.state(node);
     state.queued = false;
@@ -836,7 +839,8 @@ export class PotreeV2PointCloud {
     let pointsUsed = 0;
     let selectedCount = 0;
     while (candidates.size > 0) {
-      const { node, traversal } = candidates.pop();
+      const candidate = candidates.pop();
+      const { node, traversal } = candidate;
       const cloud = traversal.cloud;
       if (node.numPoints > 0) {
         // Candidates arrive largest first, so every remaining node would be less
@@ -845,6 +849,7 @@ export class PotreeV2PointCloud {
         pointsUsed += node.numPoints;
         cloud.selectionRank.set(node, selectedCount++);
         traversal.selected.add(node);
+        if (candidate.clip !== NO_CLIP) cloud.nodeClips.set(node, candidate.clip);
       }
       if (node.type === 2 && !node.hierarchyLoaded) {
         traversal.hierarchyPending++;
@@ -852,14 +857,15 @@ export class PotreeV2PointCloud {
         continue;
       }
       if (node.numPoints > 0) traversal.pending.push(node);
-      cloud.pushChildren(node, traversal, camera, viewportHeight, candidates);
+      cloud.pushChildren(candidate, camera, viewportHeight, candidates);
     }
     candidates.clear();
+    for (const cloud of active) cloud.fitClipCapacity();
     for (const { cloud, selected } of traversals) cloud.abortStaleRequests(selected);
     let changed = PotreeV2PointCloud.installDecodedNodes(active, limits.maxNodesToGPUPerFrame);
     PotreeV2PointCloud.requestBatches(traversals, limits);
     for (const traversal of traversals) {
-      if (traversal.cloud.finishTraversal(traversal, stamp)) changed = true;
+      if (traversal.cloud.finishTraversal(traversal, stamp) || traversal.cloud.clipChanged) changed = true;
     }
     if (PotreeV2PointCloud.evictLeastRecent(traversals, cachePointBudget)) changed = true;
     for (const { cloud, sceneReady } of traversals) {
@@ -874,9 +880,17 @@ export class PotreeV2PointCloud {
     const projection = this.projection
       .multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
       .multiply(this.group.matrixWorld);
+    const clipKey = this.clipKey;
+    clipKey.length = 0;
+    if (this.clipping) appendClippingKey(this.clipping, this.group.matrixWorld, clipKey);
+    this.clipChanged = this.clipping !== this.lastClipping || !sameKey(clipKey, this.lastClipKey);
     const unchanged = this.settled && projection.equals(this.lastView) && viewportHeight === this.lastViewportHeight &&
       pointBudget === this.lastPointBudget && cachePointBudget === this.lastCachePointBudget &&
-      this.minNodePixelSize === this.lastMinNodePixelSize && this.showBoundingBoxes === this.lastShowBoundingBoxes;
+      this.minNodePixelSize === this.lastMinNodePixelSize && this.showBoundingBoxes === this.lastShowBoundingBoxes &&
+      !this.clipChanged;
+    this.clipKey = this.lastClipKey;
+    this.lastClipKey = clipKey;
+    this.lastClipping = this.clipping;
     this.lastView.copy(projection);
     this.lastViewportHeight = viewportHeight;
     this.lastPointBudget = pointBudget;
@@ -891,22 +905,41 @@ export class PotreeV2PointCloud {
     camera.getWorldPosition(this.cameraPosition);
     this.frustum.setFromProjectionMatrix(this.projection);
     this.selectionRank.clear();
-    const traversal: Traversal = { cloud: this, selected: new Set(), pending: [], hierarchyPending: 0, sceneReady: false };
-    // Nodes outside the view are never queued, so the heap only holds visible candidates.
-    if (this.frustum.intersectsBox(this.root.box)) candidates.push({ node: this.root, pixels: Infinity, traversal });
+    const clip = this.clipping ? snapshotClipping(this.clipping, this.group.matrixWorld) : undefined;
+    const traversal: Traversal = {
+      cloud: this, clip, selected: new Set(), pending: [], hierarchyPending: 0, sceneReady: false,
+    };
+    this.nodeClips = new Map();
+    // Nodes outside the view or clipped away are never queued, so the heap only holds visible candidates.
+    if (!this.frustum.intersectsBox(this.root.box)) return traversal;
+    const rootClip = clip ? clipNode(clip.root, this.root.box, clip.keepPrune) : NO_CLIP;
+    if (rootClip) candidates.push({ node: this.root, pixels: Infinity, traversal, clip: rootClip });
     return traversal;
   }
 
   private pushChildren(
-    node: OctreeNode, traversal: Traversal, camera: Camera, viewportHeight: number, candidates: CandidateHeap,
+    { node, traversal, clip }: Candidate, camera: Camera, viewportHeight: number, candidates: CandidateHeap,
   ): void {
     for (const child of node.children) {
       if (!child || !this.frustum.intersectsBox(child.box)) continue;
       const radius = projectedRadius(
         camera, this.cameraPosition, child.box, this.group.matrixWorld, this.projectedSphere, viewportHeight,
       );
-      if (radius >= this.minNodePixelSize) candidates.push({ node: child, pixels: radius, traversal });
+      if (radius < this.minNodePixelSize) continue;
+      const childClip = traversal.clip ? clipNode(clip, child.box, traversal.clip.keepPrune) : NO_CLIP;
+      if (childClip) candidates.push({ node: child, pixels: radius, traversal, clip: childClip });
     }
+  }
+
+  /** Grow the shaders' clip capacity when a selected node crosses more clips than they hold. */
+  private fitClipCapacity(): void {
+    let boxes = 0;
+    let planes = 0;
+    for (const clip of this.nodeClips.values()) {
+      boxes = Math.max(boxes, clipBoxCount(clip));
+      planes = Math.max(planes, clip.planes.length);
+    }
+    this.material.setClipCapacity(grownCapacity(this.material.clipCapacity, { boxes, planes }));
   }
 
   /** Show one cloud's selection; returns true when its scene changed. */
@@ -952,9 +985,12 @@ export class PotreeV2PointCloud {
     for (const node of selected) {
       const state = this.installed.get(node);
       if (!state) continue;
-      show(state.points, true);
-      if (this.showBoundingBoxes && !state.boxHelper) changed = true;
-      show(this.showBoundingBoxes ? this.ensureBoxHelper(node, state) : state.boxHelper, this.showBoundingBoxes);
+      // A node hidden by clips that do not prune stays selected, loaded and budgeted, but is not drawn.
+      const visible = !this.nodeClips.get(node)?.hidden;
+      show(state.points, visible);
+      const showBox = this.showBoundingBoxes && visible;
+      if (showBox && !state.boxHelper) changed = true;
+      show(showBox ? this.ensureBoxHelper(node, state) : state.boxHelper, showBox);
       state.displayedAt = stamp;
       this.installed.delete(node);
       this.installed.set(node, state);
@@ -1080,12 +1116,13 @@ export class PotreeV2PointCloud {
     const targets: PickTarget[] = [];
     for (const node of this.displayed) {
       const points = this.installed.get(node)?.points;
-      if (points?.visible) targets.push({ node, points });
+      if (points?.visible) targets.push({ node, points, clip: this.nodeClips.get(node) ?? NO_CLIP });
     }
     this.group.updateWorldMatrix(true, false);
     this.picker ??= new PointPicker();
     const hit = await this.picker.pick(
       renderer, camera, targets, this.group.matrixWorld, x, y, this.material.size, options.radius ?? 0,
+      this.material.clipCapacity,
     );
     if (!hit || this.disposed) return null;
     return this.pickResult(hit, renderer.getPixelRatio());

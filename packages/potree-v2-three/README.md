@@ -126,6 +126,51 @@ const cloud = await loadPotreeV2('/pointcloud/metadata.json', {
 
 `metadata.json`、`hierarchy.bin`、`octree.bin` の取得はメインスレッドで行います。認証や独自の通信処理が必要なら `fetch` オプションで差し替えられます。近接するノードは1回の Range リクエストにまとめ、取得した `ArrayBuffer` をコピーせず Worker に転送します。Worker プールが Brotli 展開と点属性の復号を行い、描画側でジオメトリを組み立てます。ローカルファイルはメインスレッドで `Blob.slice()` から読みます。Web Worker が利用できない環境ではメインスレッドで復号します。
 
+## クリッピング
+
+`PotreeV2Clipping` にボックスと平面を登録し、点群の `clipping` に割り当てます。1 つの `PotreeV2Clipping` を複数の点群で共有できます。座標はワールド座標で、各点群の `group` の変換は内部で合成します。
+
+```ts
+import { PotreeV2Clipping } from '@geemil/potree-v2-three';
+
+const clipping = new PotreeV2Clipping();
+cloud.clipping = clipping; // or loadPotreeV2(url, { clipping })
+
+// A box is the unit cube from -0.5 to 0.5 transformed by `matrix`.
+const room = clipping.addBox({ matrix: new Matrix4().compose(center, rotation, size), mode: 'keep-inside' });
+const wall = clipping.addBox({ matrix: wallMatrix, mode: 'hide-inside' });
+// Keeps the side the normal points to.
+const cut = clipping.addPlane({ plane: new Plane(new Vector3(0, 0, -1), 3) });
+
+wall.enabled = isCameraOutside(wall); // e.g. every frame
+room.matrix.compose(center, rotation, size);
+clipping.remove(cut);
+```
+
+点は次の条件をすべて満たすときに表示されます。
+
+- 有効なすべての平面について、法線の向く側にある
+- 有効な `keep-inside` ボックスがあれば、そのどれかの内側にある（和集合）
+- どの `hide-inside` ボックスの内側にもない（`keep-inside` と重なった部分も消えます）
+
+境界上の点は内側として扱います。`enabled: false` のボックスや平面は、登録されていないものとして扱います。有効な `keep-inside` ボックスが 1 つもなければ、ボックスによる絞り込みはしません。
+
+ボックスの `matrix`、`mode`、`enabled`、`prune`、平面の `plane`、`enabled`、`prune` は直接書き換えてかまいません。変更は次の `update()` で検出され、そのとき `update()` は `true` を返します。拡大率が 0 のボックスや長さ 0 の法線はエラーになります。
+
+判定は 3 段階で行います。
+
+1. `update()` はノードの bbox を各クリップと比べ、クリップで完全に消えるノードを選択から外します。子ノードも探索しないので、取得も点数予算の消費もしません。
+2. 一部だけが消えるノードには、交差しているクリップだけを記録します。深いノードほど小さいので、ボックスが多くても 1 ノードあたりの判定数は少なくなります。
+3. 頂点シェーダーが、そのノードで記録したクリップだけを点ごとに判定し、消える点を描画範囲の外に出します。ピックも同じ頂点処理で描画するので、見えない点には当たりません。
+
+ノード単位で交差を判定するのは、平面とボックスの境界がノードの bbox と重なる場合です。回転したボックスでは判定が保守的になり、実際には交わらないノードもシェーダーでの判定に回ることがありますが、表示は正しいままです。
+
+`prune: false` にしたボックスや平面は、完全に消えるノードも選択に残して読み込み、描画だけを止めます。点数予算とキャッシュを使い続ける代わりに、無効にしたときや移動したときにすぐ表示に戻ります。視点に応じて頻繁に切り替える壁などに向いています。`keep-inside` ボックスの外にあるノードを選択から外すのは、有効な `keep-inside` ボックスがすべて `prune: true` の場合だけです。
+
+1 ノードで判定できるクリップの数はシェーダーの定数です。最初にクリップが必要になった時点でボックス 16 個・平面 8 枚としてコンパイルし、足りなくなったノードが現れたら倍に増やしてコンパイルし直します。コンパイルし直しても、読み込み済みのノードやキャッシュはそのまま使えます。上限は減らしません。ボックスは 1 個あたり頂点 uniform を 3 vec4 使うので、WebGL2 が保証する 256 vec4 の範囲では 1 ノードあたり 60 個程度が目安です。
+
+`cloud.material` は `ShaderMaterial` を継承した `PotreeV2PointMaterial` です。`material.size`（CSS px）で点のサイズを変えられます。
+
 ## 開発
 
 リポジトリのルートで `pnpm install`, `pnpm dev` を実行するとライブラリの watch ビルドと playground が起動します。`pnpm build` で両方をビルド、`pnpm test` で形式の読み込みを検証します。
