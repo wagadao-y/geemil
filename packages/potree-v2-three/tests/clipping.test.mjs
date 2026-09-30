@@ -141,6 +141,31 @@ test('shader uniforms apply keep, hide and plane clips in node-local float32 coo
   assert.equal(clippedByUniforms(uniforms, [4, 4, 6.9]), false);
 });
 
+test('clip arrays are uploaded only for nodes that test clips, while counts always are', () => {
+  const clip = snapshot(c => {
+    c.addBox({ matrix: boxMatrix([4, 4, 4], [2, 2, 2]), mode: 'hide-inside' });
+    c.addPlane({ plane: new Plane(new Vector3(0, 0, 1), -2) });
+  });
+  const crossing = clipNode(clip.root, box3([0, 0, 0], [8, 8, 8]), clip.keepPrune);
+  const planeOnly = clipNode(clip.root, box3([0, 0, 0], [2, 2, 8]), clip.keepPrune);
+  assert.equal(planeOnly.hide.length, 0);
+  assert.equal(planeOnly.planes.length, 1);
+  const uniforms = new ClipUniforms();
+  uniforms.resize({ boxes: 16, planes: 8 });
+  const { potreeClipBoxes: boxes, potreeClipPlanes: planes, potreeClipBoxCount, potreeClipPlaneCount } = uniforms.uniforms;
+  const origin = new Vector3();
+  uniforms.write(crossing, origin);
+  assert.deepEqual([boxes.needsUpdate, planes.needsUpdate], [true, true]);
+  // Without clips the shader reads no array element, so only the zero counts are uploaded.
+  uniforms.write(NO_CLIP, origin);
+  assert.deepEqual([boxes.needsUpdate, planes.needsUpdate], [false, false]);
+  assert.deepEqual([potreeClipBoxCount.value, potreeClipPlaneCount.value], [0, 0]);
+  assert.equal(potreeClipBoxCount.needsUpdate, undefined);
+  uniforms.write(planeOnly, origin);
+  assert.deepEqual([boxes.needsUpdate, planes.needsUpdate], [false, true]);
+  assert.deepEqual([potreeClipBoxCount.value, potreeClipPlaneCount.value], [0, 1]);
+});
+
 const base = {
   version: '2.0', encoding: 'DEFAULT', points: 4, spacing: 1,
   scale: [0.5, 0.5, 0.5], offset: [100, 200, 300],

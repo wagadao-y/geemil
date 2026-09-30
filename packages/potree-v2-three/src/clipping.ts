@@ -319,9 +319,10 @@ if (potreeClipped(position)) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 export interface ClipCapacity { boxes: number; planes: number }
 
 type ClipUniformValues = {
-  potreeClipPlanes: { value: Float32Array };
+  /** `needsUpdate: false` makes Three.js skip the upload; see ClipUniforms.write(). */
+  potreeClipPlanes: { value: Float32Array; needsUpdate?: boolean };
   potreeClipPlaneCount: { value: number };
-  potreeClipBoxes: { value: Float32Array };
+  potreeClipBoxes: { value: Float32Array; needsUpdate?: boolean };
   potreeClipKeepCount: { value: number };
   potreeClipBoxCount: { value: number };
 };
@@ -366,6 +367,13 @@ export class ClipUniforms {
     this.lastClip = clip;
     this.lastOrigin = origin;
     const { uniforms } = this;
+    // Three.js caches scalar uniforms but uploads arrays whole on every material update,
+    // which the shared material requests for each node. The shader reads the arrays only
+    // up to the counts, which are always uploaded, so a node without clips skips them.
+    // Skipping unchanged arrays instead would be unsafe: materials with equal defines share
+    // a GL program, whose arrays another cloud may have overwritten in between.
+    uniforms.potreeClipPlanes.needsUpdate = clip.planes.length > 0;
+    uniforms.potreeClipBoxes.needsUpdate = clip.hide.length > 0 || (clip.keep?.length ?? 0) > 0;
     const planes = uniforms.potreeClipPlanes.value;
     const planeCount = Math.min(clip.planes.length, this.capacity.planes);
     for (let i = 0; i < planeCount; i++) {

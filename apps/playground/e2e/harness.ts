@@ -1,8 +1,9 @@
 // Renders one point cloud at a fixed view for the Playwright tests; they call `window.harness`.
 import {
-  loadPotreeV2, PotreeV2Gradients, type PotreeV2Options, type PotreeV2PointCloud, type PotreeV2PointColorType,
+  loadPotreeV2, PotreeV2Clipping, PotreeV2Gradients, type PotreeV2Options, type PotreeV2PointCloud,
+  type PotreeV2PointColorType,
 } from '@geemil/potree-v2-three'
-import { PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three'
+import { PerspectiveCamera, Plane, Scene, Vector3, WebGLRenderer } from 'three'
 
 const SIZE = 300
 
@@ -121,6 +122,73 @@ const harness = {
   pickerGeometries(): number {
     const picker = (current() as unknown as { picker?: { proxies: { geometry: { attributes: object } }[] } }).picker
     return picker?.proxies.filter(proxy => 'position' in proxy.geometry.attributes).length ?? 0
+  },
+
+  /**
+   * Draw two clouds of `url` side by side, with equal settings so that they share one shader
+   * program, clipped by opposite planes. Returns, for each of several frames, the pixels that
+   * differ from the two clouds drawn alone, and the pixels each cloud draws alone. With a
+   * `pointBudget` of 1 each cloud draws only its root, so every frame starts with the node,
+   * and the clip, that the cloud drew last in the frame before.
+   */
+  async sharedProgramClipping(url: string, pointBudget: number) {
+    if (cloud) {
+      scene.remove(cloud.group)
+      cloud.dispose()
+      cloud = undefined
+    }
+    const clouds = await Promise.all([0, 1].map(() => loadPotreeV2(url, { pointBudget, minNodePixelSize: 10 })))
+    try {
+      const size = clouds[0]!.boundingBox.getSize(new Vector3())
+      clouds[1]!.group.position.x = size.x * 1.5
+      const middle = size.z / 2
+      // Each plane cuts through the cloud, so some nodes test it and others need no clip.
+      const planes = [new Plane(new Vector3(0, 0, 1), -middle), new Plane(new Vector3(0, 0, -1), middle)]
+      clouds.forEach((current, i) => {
+        current.clipping = new PotreeV2Clipping()
+        current.clipping.addPlane({ plane: planes[i]!, prune: false })
+        scene.add(current.group)
+      })
+      const center = new Vector3(size.x * 1.25, size.y / 2, size.z / 2)
+      const extent = size.clone().setX(size.x * 2.5).length()
+      camera.up.set(0, 0, 1)
+      camera.position.copy(center).add(new Vector3(0, -extent * 0.8, extent * 0.3))
+      camera.lookAt(center)
+      const deadline = performance.now() + 60_000
+      while (clouds.some(current => current.loadDiagnostics.state !== 'complete')) {
+        if (performance.now() > deadline) throw new Error('The view did not finish loading')
+        for (const current of clouds) current.update(camera, SIZE)
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      const alone = clouds.map(current => {
+        for (const other of clouds) other.group.visible = other === current
+        return render()
+      })
+      for (const current of clouds) current.group.visible = true
+      const differing: number[] = []
+      for (let frame = 0; frame < 3; frame++) {
+        const together = render()
+        let count = 0
+        for (let i = 0; i < together.length; i += 4) {
+          const first = alone[0]!
+          const expected = first[i] || first[i + 1] || first[i + 2] ? first : alone[1]!
+          if ([0, 1, 2].some(c => together[i + c] !== expected[i + c])) count++
+        }
+        differing.push(count)
+      }
+      const drawn = alone.map(pixels => {
+        let count = 0
+        for (let i = 0; i < pixels.length; i += 4) if (pixels[i] || pixels[i + 1] || pixels[i + 2]) count++
+        return count
+      })
+      const [first, second] = clouds.map(current => (renderer.properties.get(current.material) as { currentProgram?: object }).currentProgram)
+      return { differing, drawn, nodes: clouds.map(current => current.loadDiagnostics.requiredNodes), sharedProgram: first !== undefined && first === second }
+    } finally {
+      for (const current of clouds) {
+        scene.remove(current.group)
+        current.dispose()
+      }
+    }
   },
 
   errors() {

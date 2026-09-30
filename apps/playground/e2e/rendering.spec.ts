@@ -171,3 +171,15 @@ test('DEFAULT and BROTLI encodings draw the same pixels', async ({ page }) => {
   expect(brotli.pick).not.toBeNull()
   expect({ ...uncompressed, encoding: 'BROTLI' }).toEqual(brotli)
 })
+
+test('clouds sharing a shader program keep their own clips on every frame', async ({ page }) => {
+  // Only the roots, then the whole view.
+  for (const pointBudget of [1, 10_000_000]) {
+    const result = await page.evaluate(([url, pointBudget]) => window.harness.sharedProgramClipping(url, pointBudget), [BROTLI, pointBudget] as const)
+    expect(result.sharedProgram).toBe(true)
+    if (pointBudget === 1) expect(result.nodes).toEqual([1, 1])
+    expect(result.drawn[0]).toBeGreaterThan(100)
+    expect(result.drawn[1]).toBeGreaterThan(100)
+    expect(result.differing).toEqual([0, 0, 0])
+  }
+})
