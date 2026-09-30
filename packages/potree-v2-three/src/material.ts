@@ -3,6 +3,22 @@ import type { Vector3, WebGLRenderer } from 'three';
 import { ClipUniforms, clipVertex, clipVertexPars } from './clipping.js';
 import type { ClipCapacity, NodeClip } from './clipping.js';
 
+/** `square` fills the whole point sprite; `circle` discards its corners. */
+export type PotreeV2PointShape = 'square' | 'circle';
+
+/** Shader defines for a point shape, shared by the display and pick materials. */
+export function pointShapeDefines(shape: PotreeV2PointShape): Record<string, string | false> {
+  // Three.js skips false defines; any other value, even undefined, is emitted.
+  return { POINT_SHAPE_CIRCLE: shape === 'circle' ? '' : false };
+}
+
+/** Discards fragments outside the point shape; the first statement of a point fragment shader. */
+export const pointShapeFragment = /* glsl */`
+#ifdef POINT_SHAPE_CIRCLE
+  vec2 pointCoord = 2.0 * gl_PointCoord - 1.0;
+  if (dot(pointCoord, pointCoord) > 1.0) discard;
+#endif`;
+
 const vertexShader = /* glsl */`
 #include <common>
 #include <color_pars_vertex>
@@ -37,6 +53,7 @@ uniform vec3 diffuse;
 #include <fog_pars_fragment>
 #include <logdepthbuf_pars_fragment>
 void main() {
+  ${pointShapeFragment}
   #include <logdepthbuf_fragment>
   vec4 diffuseColor = vec4(diffuse, 1.0);
   #include <color_fragment>
@@ -47,14 +64,15 @@ void main() {
 }`;
 
 /**
- * Square screen-space points of a Potree cloud, with per-node clip uniforms.
+ * Square or circular screen-space points of a Potree cloud, with per-node clip uniforms.
  * `size` is in CSS pixels, as PointsMaterial's with sizeAttenuation off.
  */
 export class PotreeV2PointMaterial extends ShaderMaterial {
   readonly clip: ClipUniforms;
   private cssSize: number;
+  private pointShape: PotreeV2PointShape;
 
-  constructor(options: { size: number; vertexColors: boolean }) {
+  constructor(options: { size: number; shape: PotreeV2PointShape; vertexColors: boolean }) {
     const clip = new ClipUniforms();
     super({
       vertexShader, fragmentShader,
@@ -64,17 +82,27 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
         size: { value: options.size },
         ...clip.uniforms,
       },
-      defines: clip.defines,
+      defines: { ...clip.defines, ...pointShapeDefines(options.shape) },
       vertexColors: options.vertexColors,
       fog: true,
     });
     this.clip = clip;
     this.cssSize = options.size;
+    this.pointShape = options.shape;
   }
 
   /** Point size in CSS pixels. */
   get size(): number { return this.cssSize; }
   set size(value: number) { this.cssSize = value; }
+
+  /** Point shape; changing it recompiles the shader. */
+  get shape(): PotreeV2PointShape { return this.pointShape; }
+  set shape(value: PotreeV2PointShape) {
+    if (value === this.pointShape) return;
+    this.pointShape = value;
+    this.defines = { ...this.defines, ...pointShapeDefines(value) };
+    this.needsUpdate = true;
+  }
 
   get clipCapacity(): ClipCapacity { return this.clip.capacity; }
 

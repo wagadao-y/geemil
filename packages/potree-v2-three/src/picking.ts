@@ -6,6 +6,8 @@ import type { Camera, OrthographicCamera, PerspectiveCamera, WebGLRenderer } fro
 import type { OctreeNode } from './format.js';
 import { ClipUniforms, clipVertex, clipVertexPars } from './clipping.js';
 import type { ClipCapacity, NodeClip } from './clipping.js';
+import { pointShapeDefines, pointShapeFragment } from './material.js';
+import type { PotreeV2PointShape } from './material.js';
 
 /** A displayed node that can be hit by a pick. */
 export interface PickTarget {
@@ -41,6 +43,7 @@ uniform highp uint nodeId;
 flat in highp uint vIndex;
 layout(location = 0) out highp uvec4 pickId;
 void main() {
+  ${pointShapeFragment}
   pickId = uvec4(nodeId, vIndex, 0u, 0u);
 }`;
 
@@ -71,8 +74,9 @@ export class PointPicker {
     glslVersion: GLSL3,
     vertexShader, fragmentShader,
     uniforms: { size: { value: 1 }, nodeId: { value: 0 }, ...this.clip.uniforms },
-    defines: this.clip.defines,
+    defines: { ...this.clip.defines, ...pointShapeDefines('square') },
   });
+  private shape: PotreeV2PointShape = 'square';
   // RGBA_INTEGER/UNSIGNED_INT is the read format WebGL2 guarantees for unsigned
   // integer attachments, so the readback does not depend on implementation formats.
   private readonly renderTarget = new WebGLRenderTarget(1, 1, {
@@ -97,15 +101,22 @@ export class PointPicker {
   /**
    * `x`, `y` are CSS pixels from the canvas' top-left corner, and `pointSize` and
    * `radius` are CSS pixels too. With radius 0 only a point drawn under that pixel hits.
-   * `clipCapacity` is the display material's, so both compile the same clip test.
+   * `clipCapacity` and `shape` are the display material's, so both compile the same
+   * clip test and cover the same pixels.
    */
   async pick(
     renderer: WebGLRenderer, camera: Camera, targets: PickTarget[], groupMatrix: Matrix4,
     x: number, y: number, pointSize: number, radius: number, clipCapacity: ClipCapacity,
+    shape: PotreeV2PointShape,
   ): Promise<PickHit | null> {
     if (targets.length === 0 || !isPickCamera(camera)) return null;
     if (this.clip.resize(clipCapacity)) {
       this.material.defines = { ...this.material.defines, ...this.clip.defines };
+      this.material.needsUpdate = true;
+    }
+    if (shape !== this.shape) {
+      this.shape = shape;
+      this.material.defines = { ...this.material.defines, ...pointShapeDefines(shape) };
       this.material.needsUpdate = true;
     }
     const gl = renderer.getContext();

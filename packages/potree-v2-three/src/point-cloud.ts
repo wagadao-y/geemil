@@ -18,6 +18,7 @@ import { isThrottled, RequestGate } from './request-gate.js';
 import { PointPicker } from './picking.js';
 import type { PickHit, PickTarget } from './picking.js';
 import { PotreeV2PointMaterial } from './material.js';
+import type { PotreeV2PointShape } from './material.js';
 import {
   appendClippingKey, clipBoxCount, clipNode, grownCapacity, NO_CLIP, sameKey, snapshotClipping,
 } from './clipping.js';
@@ -46,6 +47,8 @@ export interface PotreeV2Options {
   maxNodesToGPUPerFrame?: number;
   /** Point size in CSS pixels. Default: 2. */
   pointSize?: number;
+  /** Point sprite shape; also the area a pick hits. Default: `'square'`, as in Potree. */
+  pointShape?: PotreeV2PointShape;
   /** Show boxes around currently displayed nodes. Default: false. */
   showBoundingBoxes?: boolean;
   /** Clip boxes and planes; one PotreeV2Clipping can be shared by several clouds. Default: null. */
@@ -384,7 +387,7 @@ export class PotreeV2PointCloud {
     });
     this.onError = options.onError;
     this.material = new PotreeV2PointMaterial({
-      size: options.pointSize ?? 2, vertexColors: this.decodedAttributes.includes('rgb'),
+      size: options.pointSize ?? 2, shape: options.pointShape ?? 'square', vertexColors: this.decodedAttributes.includes('rgb'),
     });
     this.group.name = metadata.name ?? 'Potree v2 point cloud';
   }
@@ -1122,7 +1125,7 @@ export class PotreeV2PointCloud {
     this.picker ??= new PointPicker();
     const hit = await this.picker.pick(
       renderer, camera, targets, this.group.matrixWorld, x, y, this.material.size, options.radius ?? 0,
-      this.material.clipCapacity,
+      this.material.clipCapacity, this.material.shape,
     );
     if (!hit || this.disposed) return null;
     return this.pickResult(hit, renderer.getPixelRatio());

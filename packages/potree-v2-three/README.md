@@ -169,7 +169,7 @@ clipping.remove(cut);
 
 1 ノードで判定できるクリップの数はシェーダーの定数です。最初にクリップが必要になった時点でボックス 16 個・平面 8 枚としてコンパイルし、足りなくなったノードが現れたら倍に増やしてコンパイルし直します。コンパイルし直しても、読み込み済みのノードやキャッシュはそのまま使えます。上限は減らしません。ボックスは 1 個あたり頂点 uniform を 3 vec4 使うので、WebGL2 が保証する 256 vec4 の範囲では 1 ノードあたり 60 個程度が目安です。
 
-`cloud.material` は `ShaderMaterial` を継承した `PotreeV2PointMaterial` です。`material.size`（CSS px）で点のサイズを変えられます。
+`cloud.material` は `ShaderMaterial` を継承した `PotreeV2PointMaterial` です。`material.size`（CSS px）で点のサイズを変えられます。`material.shape` は点の形で、`'square'`（既定）と `'circle'` があり、オプションの `pointShape` でも指定できます。`'circle'` では四隅を描かないので、ピックもその部分には当たりません。形を変えるとシェーダーをコンパイルし直しますが、読み込み済みのノードはそのまま使えます。
 
 ## 開発
 

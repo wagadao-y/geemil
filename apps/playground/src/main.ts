@@ -1,7 +1,7 @@
 import './style.css'
 import {
   loadPotreeV2, loadPotreeV2FromFiles, PotreeV2Clipping, selectPotreeV2Files,
-  type PotreeV2ClipBoxMode, type PotreeV2PickResult, type PotreeV2PointCloud,
+  type PotreeV2ClipBoxMode, type PotreeV2PickResult, type PotreeV2PointCloud, type PotreeV2PointShape,
 } from '@geemil/potree-v2-three'
 import GUI from 'lil-gui'
 import {
@@ -26,6 +26,7 @@ const pickMarker = document.querySelector<HTMLDivElement>('#pick-marker')!
 const settings = {
   url: new URLSearchParams(location.search).get('url') ?? '/pump/metadata.json',
   pointSize: 2,
+  pointShape: 'square' as PotreeV2PointShape,
   pointBudgetMP: 2,
   minNodePixelSize: 30,
   maxNodesToGPUPerFrame: 8,
@@ -108,6 +109,10 @@ sourceFolder.add(actions, 'reload').name('同じデータを再読み込み')
 const appearanceFolder = gui.addFolder('表示')
 appearanceFolder.add(settings, 'pointSize', 1, 8, 0.5).name('点のサイズ (px)').onChange((value: number) => {
   if (cloud) cloud.material.size = value
+  requestRender()
+})
+appearanceFolder.add(settings, 'pointShape', { 四角: 'square', 丸: 'circle' }).name('点の形').onChange((value: PotreeV2PointShape) => {
+  if (cloud) cloud.material.shape = value
   requestRender()
 })
 appearanceFolder.add(settings, 'pointBudgetMP', 0.5, 20, 0.5).name('点数予算 (MP)').onChange((value: number) => {
@@ -439,6 +444,7 @@ async function openCloud(loader: () => Promise<PotreeV2PointCloud>, source: stri
 function loadOptions() {
   return {
     pointSize: settings.pointSize,
+    pointShape: settings.pointShape,
     pointBudget: settings.pointBudgetMP * 1_000_000,
     minNodePixelSize: settings.minNodePixelSize,
     maxNodesToGPUPerFrame: settings.maxNodesToGPUPerFrame,
