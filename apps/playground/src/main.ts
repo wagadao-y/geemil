@@ -13,7 +13,7 @@ import { RenderProfiler } from './perf'
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
-  <div id="viewport"></div>
+  <div id="viewport"><div id="pick-marker" hidden></div></div>
   <div id="status" role="status">読み込み中…</div>
   <input id="files-input" type="file" accept=".json,.bin" multiple hidden>
 `
@@ -21,6 +21,7 @@ app.innerHTML = `
 const viewport = document.querySelector<HTMLDivElement>('#viewport')!
 const filesInput = document.querySelector<HTMLInputElement>('#files-input')!
 const status = document.querySelector<HTMLDivElement>('#status')!
+const pickMarker = document.querySelector<HTMLDivElement>('#pick-marker')!
 
 const settings = {
   url: new URLSearchParams(location.search).get('url') ?? '/pump/metadata.json',
@@ -258,6 +259,9 @@ let renderRequested = true
 let pointer: { x: number; y: number } | undefined
 let pickRequested = false
 let picking = false
+// World position of the picked point, marked on screen until the next pick.
+let pickedPosition: Vector3 | undefined
+const markerPosition = new Vector3()
 // OrbitControls moved the camera this frame, by dragging or damping.
 let cameraMoving = false
 
@@ -304,7 +308,27 @@ function fitCloud(next: PotreeV2PointCloud) {
   controls.update()
 }
 
+/** Place the marker over the picked point; call after the camera or the viewport changes. */
+function updatePickMarker() {
+  if (!pickedPosition) {
+    pickMarker.hidden = true
+    return
+  }
+  markerPosition.copy(pickedPosition).project(camera)
+  // Behind the camera or beyond its far plane.
+  if (markerPosition.z < -1 || markerPosition.z > 1) {
+    pickMarker.hidden = true
+    return
+  }
+  const { clientWidth: width, clientHeight: height } = viewport
+  pickMarker.style.transform =
+    `translate(${(markerPosition.x + 1) / 2 * width}px, ${(1 - markerPosition.y) / 2 * height}px)`
+  pickMarker.hidden = false
+}
+
 function showPick(result: PotreeV2PickResult | null) {
+  pickedPosition = result?.position
+  updatePickMarker()
   picked.node = result?.node ?? '—'
   picked.index = result ? String(result.index) : '—'
   picked.position = result ? result.sourcePosition.map(value => value.toFixed(3)).join(', ') : '—'
@@ -485,6 +509,7 @@ function animate() {
     const changed = renderRequested
     renderRequested = false
     profiler.measure(() => renderer.render(scene, camera))
+    updatePickMarker()
     // The point under the pointer may have changed with the view or the loaded nodes.
     if (changed) pickRequested = true
   } else {
