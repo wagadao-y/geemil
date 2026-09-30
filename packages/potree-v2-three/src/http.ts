@@ -33,7 +33,9 @@ export async function responseError(url: URL, response: Response): Promise<HttpE
 
 /**
  * Request precisely one byte range. Potree v2 requires HTTP Range support, so only
- * 206 is accepted. The body is read up to the requested size without trusting
+ * 206 is accepted, except 200 for a range from offset 0: a server may answer a range
+ * covering the whole file with the file itself, and a longer file fails once the body
+ * exceeds the range. The body is read up to the requested size without trusting
  * Content-Length, which may be missing (chunked) or describe compressed bytes.
  */
 export async function fetchRange(
@@ -46,7 +48,8 @@ export async function fetchRange(
   const response = await fetcher(url, {
     headers: { Range: `bytes=${offset}-${end}` }, signal,
   });
-  if (response.status !== 206) {
+  const wholeFile = response.status === 200 && offset === 0n;
+  if (response.status !== 206 && !wholeFile) {
     // Stop the transfer: a server ignoring Range would otherwise send the whole file.
     if (!response.ok) throw await responseError(url, response);
     await cancelBody(response.body);
@@ -55,6 +58,7 @@ export async function fetchRange(
       response.status,
     );
   }
+  if (wholeFile) return readExactly(response, Number(size), url, true);
   // Content-Range is only readable cross-origin when the server exposes it.
   const contentRange = response.headers.get('Content-Range');
   if (contentRange) {
@@ -75,9 +79,17 @@ async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void
   }
 }
 
-async function readExactly(response: Response, size: number, url: URL): Promise<ArrayBuffer> {
+/** `wholeFile`: a 200 response to a range from offset 0, valid only when the file is exactly that range. */
+async function readExactly(response: Response, size: number, url: URL, wholeFile = false): Promise<ArrayBuffer> {
+  const tooLong = () => wholeFile
+    ? new HttpError(
+      `GET ${url}: expected HTTP 206 for byte range, got 200 with a longer body; the server must support Range requests`,
+      200,
+    )
+    : new Error(`GET ${url}: response is longer than the requested ${size} bytes`);
   if (!response.body) {
     const data = await response.arrayBuffer();
+    if (data.byteLength > size) throw tooLong();
     if (data.byteLength !== size) throw new Error(`GET ${url}: expected ${size} bytes, got ${data.byteLength}`);
     return data;
   }
@@ -89,7 +101,7 @@ async function readExactly(response: Response, size: number, url: URL): Promise<
     if (done) break;
     if (received + value.byteLength > size) {
       await reader.cancel().catch(() => {});
-      throw new Error(`GET ${url}: response is longer than the requested ${size} bytes`);
+      throw tooLong();
     }
     output.set(value, received);
     received += value.byteLength;

@@ -190,6 +190,19 @@ test('rejects full-file responses without reading their body', async () => {
   assert.ok(cancelled);
 });
 
+test('accepts a whole file answered with 200 when the range starts at 0 and covers it exactly', async () => {
+  const url = new URL('https://example.test/hierarchy.bin');
+  const whole = async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+  assert.deepEqual([...new Uint8Array(await fetchRange(url, 0n, 3n, whole))], [1, 2, 3]);
+  let cancelled = false;
+  const longer = async () => new Response(new ReadableStream({
+    pull(controller) { controller.enqueue(new Uint8Array(1024)); },
+    cancel() { cancelled = true; },
+  }), { status: 200 });
+  await assert.rejects(fetchRange(url, 0n, 3n, longer), { name: 'HttpError', status: 200, message: /expected HTTP 206/ });
+  assert.ok(cancelled);
+});
+
 /** A 206 response whose body arrives in chunks, without Content-Length. */
 function chunkedRange(chunks, headers = {}) {
   return async () => new Response(new ReadableStream({
