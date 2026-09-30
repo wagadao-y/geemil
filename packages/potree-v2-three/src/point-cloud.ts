@@ -526,7 +526,10 @@ export class PotreeV2PointCloud {
     try {
       await gate.retry(() => cloud.loadHierarchy(cloud.root), LOAD_ATTEMPTS, signal);
       if (cloud.root.numPoints > 0) {
-        await gate.retry(() => cloud.loadBatch([cloud.root]), LOAD_ATTEMPTS, signal);
+        await gate.retry(async () => {
+          const [failure] = await cloud.loadBatch([cloud.root]);
+          if (failure) throw failure.error;
+        }, LOAD_ATTEMPTS, signal);
         PotreeV2PointCloud.installDecodedNodes([cloud], Infinity);
       }
       return cloud;
@@ -598,11 +601,15 @@ export class PotreeV2PointCloud {
   /**
    * `onFetched` runs once every octree range of this load has arrived or failed.
    * `signal` aborts the ranges still being fetched; dispose() aborts them as well.
+   * Returns the nodes that failed, with the error of their range or cache decode;
+   * the other nodes are queued for installation even when some failed.
    */
-  private async loadBatch(nodes: OctreeNode[], onFetched?: () => void, signal?: AbortSignal): Promise<void> {
+  private async loadBatch(
+    nodes: OctreeNode[], onFetched?: () => void, signal?: AbortSignal,
+  ): Promise<{ nodes: OctreeNode[]; error: unknown }[]> {
     if (this.disposed || nodes.length === 0) {
       onFetched?.();
-      return;
+      return [];
     }
     const diagnosticsGeneration = this.diagnosticsGeneration;
     const cached: { node: OctreeNode; bytes: ArrayBuffer }[] = [];
@@ -624,17 +631,30 @@ export class PotreeV2PointCloud {
       taskNodes.push(cached.map(item => item.node));
       tasks.push(this.decodeCachedNodes(cached, diagnosticsGeneration));
     }
-    const results = await Promise.all(tasks);
-    if (this.disposed) return;
-    for (const [task, decoded] of results.entries()) {
+    // Wait for every task, so a failed range neither discards the others' nodes nor
+    // releases the request slot while they are still fetching.
+    const results = await Promise.allSettled(tasks);
+    if (this.disposed) return [];
+    const failures: { nodes: OctreeNode[]; error: unknown }[] = [];
+    for (const [task, result] of results.entries()) {
       const expected = taskNodes[task]!;
+      if (result.status === 'rejected') {
+        failures.push({ nodes: expected, error: result.reason });
+        continue;
+      }
+      const decoded = result.value;
+      const unexpected = decoded.find((item, index) => expected[index]?.name !== item.name);
+      if (unexpected) {
+        failures.push({ nodes: expected, error: new Error(`Unexpected decoded node ${unexpected.name}`) });
+        continue;
+      }
       for (const [index, item] of decoded.entries()) {
-        const node = expected[index];
-        if (node?.name !== item.name) throw new Error(`Unexpected decoded node ${item.name}`);
+        const node = expected[index]!;
         this.state(node).queued = true;
         this.decodedQueue.push({ node, attributes: item.attributes, rank: 0 });
       }
     }
+    return failures;
   }
 
   private async fetchAndDecodeBatch(batch: NodeBatch, diagnosticsGeneration: number,
@@ -860,16 +880,21 @@ export class PotreeV2PointCloud {
       this.inFlight--;
     };
     const states = batch.nodes.map(node => this.state(node));
-    const promise = this.loadBatch(batch.nodes, releaseRequest, request.controller.signal).then(() => {
-      for (const state of states) state.failures = 0;
-    }, error => {
-      if (!this.disposed && !isAbort(error) && !isThrottled(error)) {
-        for (const [index, node] of batch.nodes.entries()) {
-          this.noteFailure(states[index]!);
-          this.onError?.(error instanceof Error ? error : new Error(String(error)), node.name);
-        }
+    const fail = (nodes: readonly OctreeNode[], error: unknown) => {
+      // A throttled node is not at fault: the gate pauses the origin and update() retries it.
+      if (this.disposed || isAbort(error) || isThrottled(error)) return;
+      for (const node of nodes) {
+        this.noteFailure(this.state(node));
+        this.onError?.(error instanceof Error ? error : new Error(String(error)), node.name);
       }
-    }).finally(() => {
+    };
+    const promise = this.loadBatch(batch.nodes, releaseRequest, request.controller.signal).then(failures => {
+      const failed = new Set(failures.flatMap(failure => failure.nodes));
+      for (const [index, node] of batch.nodes.entries()) {
+        if (!failed.has(node)) states[index]!.failures = 0;
+      }
+      for (const { nodes, error } of failures) fail(nodes, error);
+    }, error => fail(batch.nodes, error)).finally(() => {
       for (const [index, node] of batch.nodes.entries()) {
         states[index]!.loading = undefined;
         this.releaseState(node, states[index]!);

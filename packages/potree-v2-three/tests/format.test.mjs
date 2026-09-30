@@ -443,6 +443,32 @@ test('Brotli nodes are re-decoded from the encoded cache without another range r
   }
 });
 
+test('a failed range fails only its own nodes and keeps the others of the load', async () => {
+  const metadata = { ...base, points: 3, hierarchy: { firstChunkSize: 66 } };
+  const files = {
+    'metadata.json': JSON.stringify(metadata),
+    'hierarchy.bin': concat(record(1, 3, 1, 0, 18), record(0, 0, 1, 18, 18), record(0, 0, 1, 36, 18)),
+    'octree.bin': concat(
+      uncompressedPoint(2, 4, 6, 255, 0, 0), uncompressedPoint(4, 6, 8, 0, 255, 0), uncompressedPoint(6, 6, 8, 0, 0, 255),
+    ),
+  };
+  const { fetcher } = flakyCloudFetcher(files, { 'octree.bin bytes=36-53': 1 });
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, encodedCacheByteBudget: 1024 });
+  try {
+    const [first, second] = cloud.root.children.filter(Boolean);
+    await cloud.loadBatch([first]);
+    cloud.decodedQueue.length = 0;
+    // first is decoded from the encoded cache while second's range fails.
+    const failures = await cloud.loadBatch([first, second]);
+    assert.equal(failures.length, 1);
+    assert.deepEqual(failures[0].nodes, [second]);
+    assert.equal(failures[0].error.status, 500);
+    assert.deepEqual(cloud.decodedQueue.map(item => item.node), [first]);
+  } finally {
+    cloud.dispose();
+  }
+});
+
 test('loads a selected local folder using slices of the binary files', async () => {
   const hierarchy = concat(record(1, 1, 1, 0, 18), record(0, 0, 1, 18, 18));
   const octree = concat(uncompressedPoint(2, 4, 6, 255, 0, 0), uncompressedPoint(4, 6, 8, 0, 255, 0));
