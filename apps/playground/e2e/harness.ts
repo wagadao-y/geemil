@@ -75,10 +75,25 @@ const harness = {
     current().material.classification.setVisible(code, visible)
   },
 
+  setClassColor(code: number, color: string) {
+    current().material.classification.setColor(code, color)
+  },
+
+  /** Drawn pixels by `#rrggbb` color; fails when the image has more than `limit` colors. */
+  palette(limit = 64): Record<string, number> {
+    const pixels = render()
+    const counts: Record<string, number> = {}
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i] === 0 && pixels[i + 1] === 0 && pixels[i + 2] === 0) continue
+      const hex = `#${[pixels[i]!, pixels[i + 1]!, pixels[i + 2]!].map(v => v.toString(16).padStart(2, '0')).join('')}`
+      counts[hex] = (counts[hex] ?? 0) + 1
+      if (Object.keys(counts).length > limit) throw new Error(`The image has more than ${limit} colors`)
+    }
+    return counts
+  },
+
   async capture(): Promise<Capture> {
-    renderer.render(scene, camera)
-    const pixels = new Uint8Array(SIZE * SIZE * 4)
-    gl.readPixels(0, 0, SIZE, SIZE, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+    const pixels = render()
     let drawn = 0
     const sum = [0, 0, 0]
     for (let i = 0; i < pixels.length; i += 4) {
@@ -96,15 +111,23 @@ const harness = {
     }
   },
 
-  /** The point drawn nearest the view centre. */
-  async pick() {
-    const hit = await current().pick(renderer, camera, SIZE / 2, SIZE / 2, { radius: 10 })
+  /** The point drawn nearest `x`, `y` (0 to 1 across the view, from the top left), by default the centre. */
+  async pick(x = 0.5, y = 0.5) {
+    const hit = await current().pick(renderer, camera, x * SIZE, y * SIZE, { radius: 10 })
     return hit && { node: hit.node, index: hit.index, sourcePosition: hit.sourcePosition, attributes: hit.attributes }
   },
 
   errors() {
     return { shaderErrors: [...shaderErrors], glError: gl.getError() }
   },
+}
+
+/** Draw the view and read back its RGBA pixels. */
+function render(): Uint8Array {
+  renderer.render(scene, camera)
+  const pixels = new Uint8Array(SIZE * SIZE * 4)
+  gl.readPixels(0, 0, SIZE, SIZE, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+  return pixels
 }
 
 function current(): PotreeV2PointCloud {
