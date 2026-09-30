@@ -267,6 +267,10 @@ const profiler = new RenderProfiler(renderer)
 const edl = new PotreeV2EDL()
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.enableDamping = true
+// Potree's OrbitControls applies min(1, fadeFactor × dt) of the remaining motion per frame
+// with fadeFactor 20; OrbitControls damps by a fixed fraction per frame, so set it from dt.
+const DAMPING_FADE_FACTOR = 20
+let lastControlsUpdate = performance.now()
 
 // One clipping shared by every cloud loaded in this page; the library notices edits on update().
 const clipping = new PotreeV2Clipping()
@@ -531,6 +535,9 @@ function updatePerformance() {
 
 function animate() {
   frame = requestAnimationFrame(animate)
+  const controlsTime = performance.now()
+  controls.dampingFactor = Math.min(1, DAMPING_FADE_FACTOR * (controlsTime - lastControlsUpdate) / 1000)
+  lastControlsUpdate = controlsTime
   // OrbitControls reports movement, including damping after the pointer is released.
   cameraMoving = controls.update()
   if (cameraMoving) requestRender()
