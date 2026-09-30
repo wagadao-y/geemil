@@ -117,6 +117,12 @@ const harness = {
     return hit && { node: hit.node, index: hit.index, sourcePosition: hit.sourcePosition, attributes: hit.attributes }
   },
 
+  /** Node geometries the picker still references after its picks; 0 unless one is in progress. */
+  pickerGeometries(): number {
+    const picker = (current() as unknown as { picker?: { proxies: { geometry: { attributes: object } }[] } }).picker
+    return picker?.proxies.filter(proxy => 'position' in proxy.geometry.attributes).length ?? 0
+  },
+
   errors() {
     return { shaderErrors: [...shaderErrors], glError: gl.getError() }
   },

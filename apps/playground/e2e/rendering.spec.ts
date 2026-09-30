@@ -90,6 +90,14 @@ test('every color type compiles and draws its colors', async ({ page }) => {
   expect((await capture(page)).mean[0]).toBeGreaterThan(r)
 })
 
+test('the picker keeps no node geometry after a pick', async ({ page }) => {
+  await load(page, BROTLI)
+  expect(await pick(page)).not.toBeNull()
+  expect(await page.evaluate(() => window.harness.pickerGeometries())).toBe(0)
+  // Proxies reused by the next pick still draw their nodes.
+  expect(await pick(page)).not.toBeNull()
+})
+
 test('hidden classes are neither drawn nor picked', async ({ page }) => {
   await load(page, BROTLI, { attributes: COLOR_ATTRIBUTES })
   expect(await pick(page)).not.toBeNull()

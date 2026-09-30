@@ -101,6 +101,8 @@ export class PointPicker {
   private readonly scene = new Scene();
   /** Reused stand-ins that draw node geometries with the ID material; proxy i writes ID i + 1. */
   private readonly proxies: Points<BufferGeometry, ShaderMaterial>[] = [];
+  /** Held by proxies between picks, so that they keep no node geometry alive after its eviction. */
+  private readonly emptyGeometry = new BufferGeometry();
   /** The target each proxy draws in the current pick. */
   private readonly proxyTargets: PickTarget[] = [];
   private readonly frustum = new Frustum();
@@ -226,6 +228,7 @@ export class PointPicker {
       renderer.setClearColor(previousClearColor, previousClearAlpha);
       renderer.setRenderTarget(previousTarget);
       this.scene.clear();
+      for (let i = 0; i < drawn.length; i++) this.proxies[i]!.geometry = this.emptyGeometry;
       this.proxyTargets.length = 0;
       this.display = undefined;
     }
@@ -264,7 +267,7 @@ export class PointPicker {
   private proxy(index: number): Points<BufferGeometry, ShaderMaterial> {
     let proxy = this.proxies[index];
     if (!proxy) {
-      proxy = new Points(new BufferGeometry(), this.material);
+      proxy = new Points(this.emptyGeometry, this.material);
       proxy.matrixAutoUpdate = false;
       proxy.frustumCulled = false;
       const id = index + 1;
@@ -284,6 +287,7 @@ export class PointPicker {
   dispose(): void {
     this.scene.clear();
     this.proxies.length = 0;
+    this.emptyGeometry.dispose();
     this.material.dispose();
     this.renderTarget.dispose();
   }
