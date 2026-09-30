@@ -736,6 +736,40 @@ test('retry waits for the gate and gives up on other errors', async () => {
   assert.equal(calls, 1);
 });
 
+test('concurrent retries after a pause never exceed the lowered limit', async () => {
+  const gate = new RequestGate();
+  await assert.rejects(gate.request(async () => { throw new HttpError('busy', 429, 20); }, 10), HttpError);
+  assert.equal(gate.concurrencyLimit, 1);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  let running = 0;
+  const limits = [];
+  const task = () => gate.request(async () => {
+    running++;
+    limits.push([running, gate.concurrencyLimit]);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    running--;
+  }, 10);
+  // All see the pause over in the same turn; only one may take the single slot, and
+  // the others start as successes raise the limit again.
+  await Promise.all([gate.retry(task, 3), gate.retry(task, 3), task()]);
+  assert.equal(limits.length, 3);
+  assert.deepEqual(limits[0], [1, 1]);
+  for (const [count, limit] of limits) assert.ok(count <= limit, `${count} requests at limit ${limit}`);
+});
+
+test('a request waiting for a slot is abandoned when its signal aborts', async () => {
+  const gate = new RequestGate();
+  await assert.rejects(gate.request(async () => { throw new HttpError('busy', 429, 1000); }, 10), HttpError);
+  const controller = new AbortController();
+  let started = false;
+  const waiting = gate.request(async () => { started = true; }, 10, controller.signal);
+  controller.abort();
+  await assert.rejects(waiting, { name: 'AbortError' });
+  assert.equal(started, false);
+  await new Promise(resolve => setTimeout(resolve, 1010));
+  assert.equal(gate.available(), 1, 'the abandoned wait holds no slot');
+});
+
 test('load retries throttled metadata and root requests', async () => {
   let metadataFailures = 1;
   const { fetcher } = flakyCloudFetcher(childFiles, { 'hierarchy.bin bytes=0-43': 1, 'octree.bin bytes=0-17': 1 }, 429);

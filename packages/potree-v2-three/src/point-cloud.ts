@@ -584,7 +584,7 @@ export class PotreeV2PointCloud {
     try {
       return await this.gate.request(() => fetchRange(
         new URL(file, this.metadataUrl), offset, size, this.fetcher, signal,
-      ), this.retryDelayMs);
+      ), this.retryDelayMs, signal);
     } catch (error) {
       if (isThrottled(error) && !this.disposed) this.diagnosticsState.throttledResponses++;
       throw error;

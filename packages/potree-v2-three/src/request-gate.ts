@@ -67,9 +67,13 @@ export class RequestGate {
   /** Current adaptive limit, or Infinity while the origin has not throttled. */
   get concurrencyLimit(): number { return this.limit; }
 
-  /** Run one request, counting it against the limit and learning from its outcome. */
-  async request<T>(task: () => Promise<T>, baseDelayMs: number): Promise<T> {
-    this.inFlight++;
+  /**
+   * Run one request, counting it against the limit and learning from its outcome.
+   * It starts at once when a slot is free, as it is after available() said so, and
+   * otherwise waits for one; `signal` abandons the wait.
+   */
+  async request<T>(task: () => Promise<T>, baseDelayMs: number, signal?: AbortSignal): Promise<T> {
+    if (!this.tryAdmit()) await this.admit(signal);
     try {
       const result = await task();
       this.noteSuccess();
@@ -83,12 +87,12 @@ export class RequestGate {
   }
 
   /**
-   * Retry `task` while the origin throttles, waiting for the gate each time.
-   * For requests that no update loop will retry, such as the initial load.
+   * Retry `task` while the origin throttles. The requests it makes through request()
+   * wait for the gate. For requests that no update loop will retry, such as the initial load.
    */
   async retry<T>(task: () => Promise<T>, attempts: number, signal?: AbortSignal): Promise<T> {
     for (let attempt = 1; ; attempt++) {
-      await this.whenOpen(signal);
+      if (signal?.aborted) throw abortError();
       try {
         return await task();
       } catch (error) {
@@ -97,11 +101,22 @@ export class RequestGate {
     }
   }
 
-  private async whenOpen(signal?: AbortSignal): Promise<void> {
+  /**
+   * Take a slot if one is free. The check and the count happen without an await in
+   * between, so concurrent requests never share one slot.
+   */
+  private tryAdmit(now = performance.now()): boolean {
+    if (this.available(now) <= 0) return false;
+    this.inFlight++;
+    return true;
+  }
+
+  /** Take a slot, waiting while the origin is paused or full. */
+  private async admit(signal?: AbortSignal): Promise<void> {
     for (;;) {
       if (signal?.aborted) throw abortError();
       const now = performance.now();
-      if (this.available(now) > 0) return;
+      if (this.tryAdmit(now)) return;
       await sleep(now < this.resumeAt ? this.resumeAt - now : SLOT_POLL_MS, signal);
     }
   }
