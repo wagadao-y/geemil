@@ -252,3 +252,24 @@ test('a cloud whose shared pool failed decodes with a new pool', { timeout: 5000
     restore();
   }
 });
+
+test('batch decoding counts the point occupancy of nodes given their extent', { timeout: 5000 }, async () => {
+  const restore = installNodeWorker();
+  const pool = new DecoderPool(1);
+  try {
+    // Two points in one cell and one in another of the node's 32³ grid: 3 / 2 points per cell, truncated to 1.
+    const bytes = new ArrayBuffer(36);
+    const view = new DataView(bytes);
+    [[0, 0, 0], [0, 0, 0], [7, 7, 7]].forEach((p, i) => p.forEach((v, j) => view.setInt32(i * 12 + j * 4, v, true)));
+    const nodes = [
+      { name: 'r', offset: 0n, size: 36n, pointCount: 3, extent: [8, 8, 8] },
+      { name: 'r0', offset: 0n, size: 24n, pointCount: 2, extent: [8, 8, 8] },
+      { name: 'r1', offset: 0n, size: 12n, pointCount: 1 },
+    ];
+    const decoded = await pool.decodeBatch(bytes, 0n, nodes, { ...metadata, points: 3 });
+    assert.deepEqual(decoded.map(node => node.occupancy), [1, 2, undefined]);
+  } finally {
+    pool.dispose();
+    restore();
+  }
+});

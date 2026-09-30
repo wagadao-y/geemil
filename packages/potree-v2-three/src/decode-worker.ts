@@ -1,14 +1,10 @@
 import { initBrotli } from './brotli-codecs.js';
-import { decodeNodeData } from './decode.js';
-import type { DecodedNodeData } from './decode.js';
+import { decodeBatchNode, decodeNodeData } from './decode.js';
+import type { BatchNodeRequest, DecodedBatchNode, DecodedNodeData } from './decode.js';
 import type { NodeDecodeTiming, NodeOrigin } from './decode.js';
 import type { PotreeV2Metadata } from './format.js';
 
-export interface BatchNodeRequest {
-  name: string; pointCount: number; offset: bigint; size: bigint;
-  /** Origin of the decoded positions, normally the node's box minimum. Default: the cloud origin. */
-  origin?: NodeOrigin;
-}
+export type { BatchNodeRequest } from './decode.js';
 
 /** Sent once after the Worker starts; it gets no response. */
 export interface WarmRequest { warm: true; brotli: boolean }
@@ -29,7 +25,7 @@ export interface DecodeRequest {
 export interface DecodeResponse {
   id: number;
   attributes?: DecodedNodeData;
-  nodes?: { name: string; attributes: DecodedNodeData }[];
+  nodes?: DecodedBatchNode[];
   error?: string;
   timing?: NodeDecodeTiming;
 }
@@ -60,18 +56,12 @@ scope.onmessage = async event => {
       return;
     }
     if (start === undefined || !nodes) throw new Error('Incomplete batch request');
-    const size = BigInt(bytes.byteLength);
-    const decoded: NonNullable<DecodeResponse['nodes']> = [];
+    const decoded: DecodedBatchNode[] = [];
     const transfer: Transferable[] = [];
     for (const node of nodes) {
-      const offset = node.offset - start;
-      if (offset < 0n || node.size < 0n || offset + node.size > size) throw new Error(`Node ${node.name}: range outside batch`);
-      const attributes = await decodeNodeData(
-        new Uint8Array(bytes, Number(offset), Number(node.size)), node.name, node.pointCount, metadata, addTiming, names,
-        node.origin,
-      );
-      decoded.push({ name: node.name, attributes });
-      transfer.push(...Object.values(attributes).map(a => a.array.buffer));
+      const result = await decodeBatchNode(bytes, start, node, metadata, addTiming, names);
+      decoded.push(result);
+      transfer.push(...Object.values(result.attributes).map(a => a.array.buffer));
     }
     scope.postMessage({ id, nodes: decoded, timing }, transfer);
   } catch (error) {

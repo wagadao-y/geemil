@@ -27,26 +27,20 @@ const occupiedCells = new Uint8Array(GRID ** 3);
 /** Potree's calibration: its lodOffset is half a level deeper than the surface estimate. */
 const POTREE_LOD_BIAS = 0.5;
 
+/** A node's size along x, y and z, in the cloud's local units. */
+export type NodeExtent = readonly [number, number, number];
+
 /**
- * Levels to add to a node's level so that it matches the node's measured point spacing.
- * As Potree's occupancy, points per occupied cell of a 32³ grid over the node; on a
- * surface, n points in a cell of edge c are about c / √n apart. An octree stops splitting
- * where few points remain, not where they are sparse, so a coarse leaf of a scan is often
- * as dense as the deeper nodes around it; without this, its points are drawn several times larger.
- * With at least one point per occupied cell, spacings above the cell edge read as the cell edge.
- * Matches Potree's `log2(occupancy) / 2 - 1.5` for PotreeConverter 2 output, whose spacing is
- * the root size / 128, including its truncated occupancy and half-level bias, so that the same
- * `size` looks the same as in Potree.
+ * Points per occupied cell of a 32³ grid over a node, truncated to an integer as
+ * Potree's decoder does; 0 without points. Positions are relative to the node's minimum.
+ * The decoder Workers count it, so that installing a node does not walk its points.
  */
-export function densityLevelOffset(positions: ArrayLike<number>, box: Box3, level: number, rootSpacing: number): number {
+export function pointOccupancy(positions: ArrayLike<number>, extent: NodeExtent): number {
   const count = positions.length / 3;
   if (count === 0) return 0;
-  const sx = box.max.x - box.min.x;
-  const sy = box.max.y - box.min.y;
-  const sz = box.max.z - box.min.z;
+  const [sx, sy, sz] = extent;
   occupiedCells.fill(0);
   let occupied = 0;
-  // Positions are relative to the box minimum.
   for (let i = 0; i < positions.length; i += 3) {
     const ix = Math.min(GRID - 1, Math.max(0, Math.floor(positions[i]! / sx * GRID)));
     const iy = Math.min(GRID - 1, Math.max(0, Math.floor(positions[i + 1]! / sy * GRID)));
@@ -57,9 +51,37 @@ export function densityLevelOffset(positions: ArrayLike<number>, box: Box3, leve
       occupied++;
     }
   }
-  const pointSpacing = Math.cbrt(sx * sy * sz) / GRID / Math.sqrt(Math.floor(count / occupied));
+  return Math.floor(count / occupied);
+}
+
+/**
+ * Levels to add to a node's level so that it matches the node's measured point spacing.
+ * `occupancy` is pointOccupancy(), as Potree's; on a surface, n points in a cell of edge c
+ * are about c / √n apart. An octree stops splitting where few points remain, not where they
+ * are sparse, so a coarse leaf of a scan is often as dense as the deeper nodes around it;
+ * without this, its points are drawn several times larger. With at least one point per
+ * occupied cell, spacings above the cell edge read as the cell edge.
+ * Matches Potree's `log2(occupancy) / 2 - 1.5` for PotreeConverter 2 output, whose spacing is
+ * the root size / 128, including its truncated occupancy and half-level bias, so that the same
+ * `size` looks the same as in Potree.
+ */
+export function occupancyLevelOffset(occupancy: number, extent: NodeExtent, level: number, rootSpacing: number): number {
+  if (occupancy === 0) return 0;
+  const [sx, sy, sz] = extent;
+  const pointSpacing = Math.cbrt(sx * sy * sz) / GRID / Math.sqrt(occupancy);
   const levelSpacing = rootSpacing / 2 ** level;
   return Math.log2(levelSpacing / pointSpacing) + POTREE_LOD_BIAS;
+}
+
+/** occupancyLevelOffset() of a node's positions, relative to the minimum of `box`. */
+export function densityLevelOffset(positions: ArrayLike<number>, box: Box3, level: number, rootSpacing: number): number {
+  const extent = nodeExtent(box);
+  return occupancyLevelOffset(pointOccupancy(positions, extent), extent, level, rootSpacing);
+}
+
+/** The size of a node's box. */
+export function nodeExtent(box: Box3): NodeExtent {
+  return [box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z];
 }
 
 export const pointSizeVertexPars = /* glsl */`

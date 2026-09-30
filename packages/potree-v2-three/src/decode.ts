@@ -1,6 +1,8 @@
 import { Box3, BufferAttribute, BufferGeometry, Sphere } from 'three';
 import type { OctreeNode, PotreeV2Attribute, PotreeV2AttributeType, PotreeV2Metadata } from './format.js';
 import { decompressBrotli } from './brotli-codecs.js';
+import { pointOccupancy } from './point-size.js';
+import type { NodeExtent } from './point-size.js';
 
 /** DataView reader for one element type, chosen once per attribute instead of per value. */
 function elementReader(view: DataView, type: PotreeV2AttributeType): (at: number) => number {
@@ -148,6 +150,45 @@ export async function decodeNodeData(
   const attributes = decodeAttributes(input, nodeName, pointCount, metadata, attributeNames, origin);
   onTiming?.({ setupMs: 0, brotliMs: 0, attributesMs: performance.now() - startedAt });
   return attributes;
+}
+
+/** One node of a batch request. */
+export interface BatchNodeRequest {
+  name: string; pointCount: number; offset: bigint; size: bigint;
+  /** Origin of the decoded positions, normally the node's box minimum. Default: the cloud origin. */
+  origin?: NodeOrigin;
+  /** The node's box size; when given, the point occupancy for adaptive sizes is counted too. */
+  extent?: NodeExtent;
+}
+
+export interface DecodedBatchNode {
+  name: string;
+  attributes: DecodedNodeData;
+  /** pointOccupancy() of the node, when its extent was requested. */
+  occupancy?: number;
+}
+
+/**
+ * Decode one node of a batch whose buffer starts at file offset `start`, reading its
+ * range in place. Used by the decoder Workers and by the main thread without Workers.
+ */
+export async function decodeBatchNode(
+  bytes: ArrayBuffer, start: bigint, node: BatchNodeRequest, metadata: PotreeV2Metadata,
+  onTiming?: (timing: NodeDecodeTiming) => void, attributeNames?: readonly string[],
+): Promise<DecodedBatchNode> {
+  const offset = node.offset - start;
+  if (offset < 0n || node.size < 0n || offset + node.size > BigInt(bytes.byteLength)) {
+    throw new Error(`Node ${node.name}: range outside batch`);
+  }
+  const attributes = await decodeNodeData(
+    new Uint8Array(bytes, Number(offset), Number(node.size)), node.name, node.pointCount, metadata, onTiming,
+    attributeNames, node.origin,
+  );
+  if (!node.extent) return { name: node.name, attributes };
+  const startedAt = performance.now();
+  const occupancy = pointOccupancy(attributes.position?.array ?? [], node.extent);
+  onTiming?.({ setupMs: 0, brotliMs: 0, attributesMs: performance.now() - startedAt });
+  return { name: node.name, attributes, occupancy };
 }
 
 function bytesPerPoint(metadata: PotreeV2Metadata): number {

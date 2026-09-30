@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Box3, Vector3 } from 'three';
-import { densityLevelOffset, PointSizeUniforms, VisibleNodesTexture } from '../dist/point-size.js';
+import {
+  densityLevelOffset, occupancyLevelOffset, pointOccupancy, PointSizeUniforms, VisibleNodesTexture,
+} from '../dist/point-size.js';
 
 function node(name, box) {
   return { name, level: name.length - 1, box, children: [] };
@@ -135,6 +137,10 @@ test('density level offset follows points per occupied cell, as Potree', () => {
   // The offset is relative to the node's own level.
   near(densityLevelOffset(plane(64), box, 2, 4 * 32 / 128), potree(4));
   assert.equal(densityLevelOffset(new Float32Array(), box, 0, 1), 0);
+  // The decoder counts the occupancy, and installation only converts it.
+  assert.equal(pointOccupancy(plane(64), [32, 32, 32]), 4);
+  assert.equal(pointOccupancy(new Float32Array(), [32, 32, 32]), 0);
+  near(occupancyLevelOffset(4, [32, 32, 32], 0, 32 / 128), potree(4));
 });
 
 test('point size uniforms scale only pixel sizes by the pixel ratio', () => {

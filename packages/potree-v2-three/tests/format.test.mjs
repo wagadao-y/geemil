@@ -521,6 +521,8 @@ test('a failed range fails only its own nodes and keeps the others of the load',
     assert.deepEqual(failures[0].nodes, [second]);
     assert.equal(failures[0].error.status, 500);
     assert.deepEqual(cloud.decodedQueue.map(item => item.node), [first]);
+    // Decoding counted the occupancy that installation turns into the adaptive size offset.
+    assert.equal(cloud.decodedQueue[0].occupancy, 1);
   } finally {
     cloud.dispose();
   }

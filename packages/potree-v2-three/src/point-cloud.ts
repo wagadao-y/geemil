@@ -5,7 +5,7 @@ import {
 } from 'three';
 import type { Box3, WebGLRenderer } from 'three';
 import { createNodeGeometry, DEFAULT_DECODED_ATTRIBUTES, nodeOrigin } from './decode.js';
-import type { DecodedNodeData } from './decode.js';
+import type { DecodedBatchNode, DecodedNodeData } from './decode.js';
 import type { NodeDecodeTiming } from './decode.js';
 import { DecoderPool } from './decoder-pool.js';
 import { makeNodeBatches } from './batches.js';
@@ -21,7 +21,7 @@ import { PotreeV2PointMaterial } from './material.js';
 import type { PotreeV2PointShape } from './material.js';
 import { colorTypeAttribute, PotreeV2Gradients } from './point-color.js';
 import type { PotreeV2Classification, PotreeV2Gradient, PotreeV2PointColorType } from './point-color.js';
-import { densityLevelOffset, VisibleNodesTexture } from './point-size.js';
+import { nodeExtent, occupancyLevelOffset, pointOccupancy, VisibleNodesTexture } from './point-size.js';
 import type { PotreeV2PointSizeType } from './point-size.js';
 import {
   appendClippingKey, clipBoxCount, clipNode, grownCapacity, NO_CLIP, sameKey, snapshotClipping,
@@ -280,6 +280,9 @@ export let updatePointClouds: (
   clouds: readonly PotreeV2PointCloud[], camera: Camera, viewportHeight: number, limits: UpdateLimits, force: boolean,
 ) => boolean;
 
+/** A decoded node waiting for installation; `rank` is scratch space for installDecodedNodes. */
+type DecodedQueueItem = { node: OctreeNode; attributes: DecodedNodeData; occupancy?: number; rank: number };
+
 /** An octree batch a cloud could request now; `rank` orders plans across clouds. */
 type BatchPlan = { cloud: PotreeV2PointCloud; batch: NodeBatch; rank: number };
 
@@ -365,7 +368,7 @@ export class PotreeV2PointCloud {
   /** Density level offsets of installed nodes, for adaptive point sizes. */
   private readonly levelOffsets = new Map<OctreeNode, number>();
   /** Decoded nodes waiting for installation; `rank` is scratch space for installDecodedNodes. */
-  private readonly decodedQueue: { node: OctreeNode; attributes: DecodedNodeData; rank: number }[] = [];
+  private readonly decodedQueue: DecodedQueueItem[] = [];
   private readonly controller = new AbortController();
   private decoder: DecoderPool;
   private readonly encodedCache: EncodedNodeCache;
@@ -640,7 +643,7 @@ export class PotreeV2PointCloud {
     const fetched = () => { if (--fetching === 0) onFetched?.(); };
     // Each task's results follow the order of its node list.
     const taskNodes = batches.map(batch => batch.nodes);
-    const tasks: Promise<{ name: string; attributes: DecodedNodeData }[]>[] =
+    const tasks: Promise<DecodedBatchNode[]>[] =
       batches.map(batch => this.fetchAndDecodeBatch(batch, diagnosticsGeneration, fetched, signal));
     if (cached.length > 0) {
       taskNodes.push(cached.map(item => item.node));
@@ -666,14 +669,14 @@ export class PotreeV2PointCloud {
       for (const [index, item] of decoded.entries()) {
         const node = expected[index]!;
         this.state(node).queued = true;
-        this.decodedQueue.push({ node, attributes: item.attributes, rank: 0 });
+        this.decodedQueue.push({ node, attributes: item.attributes, occupancy: item.occupancy, rank: 0 });
       }
     }
     return failures;
   }
 
   private async fetchAndDecodeBatch(batch: NodeBatch, diagnosticsGeneration: number,
-    onFetched: () => void, signal?: AbortSignal): Promise<{ name: string; attributes: DecodedNodeData }[]> {
+    onFetched: () => void, signal?: AbortSignal): Promise<DecodedBatchNode[]> {
     const statsGeneration = this.fetchStatsGeneration;
     const startedAt = performance.now();
     this.activeDecodeBatches++;
@@ -699,7 +702,8 @@ export class PotreeV2PointCloud {
       const decoded = await this.liveDecoder().decodeBatch(
         bytes, batch.start,
         batch.nodes.map(node => ({
-          name: node.name, pointCount: node.numPoints, offset: node.byteOffset, size: node.byteSize, origin: nodeOrigin(node),
+          name: node.name, pointCount: node.numPoints, offset: node.byteOffset, size: node.byteSize,
+          origin: nodeOrigin(node), extent: nodeExtent(node.box),
         })),
         this.metadata, timing => this.noteDecodeTiming(timing, diagnosticsGeneration),
         this.decodedAttributes, this.controller.signal,
@@ -726,7 +730,7 @@ export class PotreeV2PointCloud {
   }
 
   private decodeCachedNodes(cached: { node: OctreeNode; bytes: ArrayBuffer }[],
-    diagnosticsGeneration: number): Promise<{ name: string; attributes: DecodedNodeData }[]> {
+    diagnosticsGeneration: number): Promise<DecodedBatchNode[]> {
     const size = cached.reduce((sum, item) => sum + item.bytes.byteLength, 0);
     const combined = new Uint8Array(size);
     const requests = [];
@@ -735,7 +739,7 @@ export class PotreeV2PointCloud {
       combined.set(new Uint8Array(bytes), offset);
       requests.push({
         name: node.name, pointCount: node.numPoints, offset: BigInt(offset), size: BigInt(bytes.byteLength),
-        origin: nodeOrigin(node),
+        origin: nodeOrigin(node), extent: nodeExtent(node.box),
       });
       offset += bytes.byteLength;
     }
@@ -778,9 +782,13 @@ export class PotreeV2PointCloud {
     return true;
   }
 
-  private installNode({ node, attributes }: { node: OctreeNode; attributes: DecodedNodeData }): void {
+  private installNode({ node, attributes, occupancy }: DecodedQueueItem): void {
     const geometry = createNodeGeometry(attributes, node.box);
-    this.levelOffsets.set(node, densityLevelOffset(attributes.position!.array, node.box, node.level, this.metadata.spacing));
+    // The decoder counted the occupancy, so installing does not walk the points.
+    const extent = nodeExtent(node.box);
+    this.levelOffsets.set(node, occupancyLevelOffset(
+      occupancy ?? pointOccupancy(attributes.position!.array, extent), extent, node.level, this.metadata.spacing,
+    ));
     const points = new Points(geometry, this.material);
     points.name = node.name;
     // Positions are relative to the node's minimum; the large offset stays in double-precision matrices.

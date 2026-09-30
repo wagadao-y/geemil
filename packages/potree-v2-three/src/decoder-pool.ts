@@ -1,8 +1,7 @@
-import { decodeNodeData } from './decode.js';
-import type { DecodedNodeData } from './decode.js';
+import { decodeBatchNode, decodeNodeData } from './decode.js';
+import type { BatchNodeRequest, DecodedBatchNode, DecodedNodeData } from './decode.js';
 import type { NodeDecodeTiming, NodeOrigin } from './decode.js';
 import type { DecodeRequest, DecodeResponse } from './decode-worker.js';
-import type { BatchNodeRequest } from './decode-worker.js';
 import type { PotreeV2Metadata } from './format.js';
 
 type DecodeJob = {
@@ -121,21 +120,11 @@ export class DecoderPool {
   async decodeBatch(
     bytes: ArrayBuffer, start: bigint, nodes: BatchNodeRequest[], metadata: PotreeV2Metadata,
     onTiming?: (timing: NodeDecodeTiming) => void, attributeNames?: string[], signal?: AbortSignal,
-  ): Promise<{ name: string; attributes: DecodedNodeData }[]> {
+  ): Promise<DecodedBatchNode[]> {
     if (this.disposed) throw abortError();
     if (typeof Worker === 'undefined') {
       const decoded = [];
-      for (const node of nodes) {
-        const offset = Number(node.offset - start);
-        if (offset < 0 || node.size < 0n || BigInt(offset) + node.size > BigInt(bytes.byteLength)) {
-          throw new Error(`Node ${node.name}: range outside batch`);
-        }
-        const attributes = await decodeNodeData(
-          new Uint8Array(bytes, offset, Number(node.size)), node.name, node.pointCount, metadata, onTiming, attributeNames,
-          node.origin,
-        );
-        decoded.push({ name: node.name, attributes });
-      }
+      for (const node of nodes) decoded.push(await decodeBatchNode(bytes, start, node, metadata, onTiming, attributeNames));
       return decoded;
     }
     const result = await this.run(
