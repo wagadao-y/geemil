@@ -1,8 +1,9 @@
 import './style.css'
 import {
-  loadPotreeV2, loadPotreeV2FromFiles, PotreeV2Clipping, PotreeV2EDL, selectPotreeV2Files,
-  type PotreeV2ClipBoxMode, type PotreeV2PickResult, type PotreeV2PointCloud, type PotreeV2PointShape,
-  type PotreeV2PointSizeType,
+  loadPotreeV2, loadPotreeV2FromFiles, PotreeV2Classification, PotreeV2Clipping, PotreeV2EDL, PotreeV2Gradients,
+  selectPotreeV2Files,
+  type PotreeV2ClipBoxMode, type PotreeV2PickResult, type PotreeV2PointCloud, type PotreeV2PointColorType,
+  type PotreeV2PointShape, type PotreeV2PointSizeType,
 } from '@geemil/potree-v2-three'
 import GUI from 'lil-gui'
 import {
@@ -11,6 +12,8 @@ import {
 } from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { RenderProfiler } from './perf'
+
+type GradientName = keyof typeof PotreeV2Gradients
 
 const app = document.querySelector<HTMLDivElement>('#app')!
 app.innerHTML = `
@@ -32,6 +35,10 @@ const settings = {
   edlStrength: 0.4,
   edlRadius: 1.4,
   pointSizeType: 'fixed' as PotreeV2PointSizeType,
+  pointColorType: 'rgb' as PotreeV2PointColorType,
+  solidColor: '#ffffff',
+  gradient: 'SPECTRAL' as GradientName,
+  intensityGamma: 1,
   minPointSize: 2,
   maxPointSize: 50,
   pointBudgetMP: 2,
@@ -79,6 +86,7 @@ const actions = {
   loadUrl: () => {
     const url = settings.url.trim()
     if (!url) { setStatus('metadata.json の URL を入力してください。', true); return }
+    decodedAttributes = undefined
     void openCloud(() => loadPotreeV2(url, loadOptions()), url, url)
   },
   chooseFiles: () => filesInput.click(),
@@ -154,6 +162,42 @@ appearanceFolder.add(settings, 'maxNodesToGPUPerFrame', [1, 2, 4, 8, 16, 32, 64]
 appearanceFolder.add(settings, 'showBoundingBoxes').name('ノードの bbox を表示').onChange((value: boolean) => {
   if (cloud) cloud.showBoundingBoxes = value
 })
+const colorFolder = gui.addFolder('色')
+const colorTypeController = colorFolder.add(settings, 'pointColorType', {
+  RGB: 'rgb', 単色: 'solid', 標高: 'elevation', 強度: 'intensity', 分類: 'classification',
+}).name('色の種類').onChange(() => {
+  if (cloud) applyColorType(cloud)
+  requestRender()
+})
+colorFolder.addColor(settings, 'solidColor').name('単色').onChange((value: string) => {
+  cloud?.material.color.set(value)
+  requestRender()
+})
+colorFolder.add(settings, 'gradient', Object.keys(PotreeV2Gradients)).name('標高のグラデーション').onChange((value: GradientName) => {
+  if (cloud) cloud.material.gradient = PotreeV2Gradients[value]
+  requestRender()
+})
+colorFolder.add(settings, 'intensityGamma', 0.1, 4, 0.05).name('強度のガンマ').onChange((value: number) => {
+  if (cloud) cloud.material.intensityGamma = value
+  requestRender()
+})
+// Shared by every loaded cloud, so hidden classes stay hidden across reloads.
+const classification = new PotreeV2Classification()
+const classFolder = colorFolder.addFolder('分類の表示')
+const classNames: Record<number, string> = {
+  0: '未分類 (0)', 1: '未割当 (1)', 2: '地面', 3: '低植生', 4: '中植生', 5: '高植生', 6: '建物',
+  7: 'ノイズ', 8: 'キーポイント', 9: '水面', 12: 'オーバーラップ',
+}
+const classVisibility = Object.fromEntries(Object.keys(classNames).map(code => [code, true]))
+for (const [code, name] of Object.entries(classNames)) {
+  classFolder.add(classVisibility, code).name(name).onChange((visible: boolean) => {
+    classification.setVisible(Number(code), visible)
+    // Hiding a class needs the classification attribute.
+    if (cloud) decodeAndReload(cloud, 'classification')
+    requestRender()
+  })
+}
+classFolder.close()
 const clipFolder = gui.addFolder('クリッピング')
 const boxFolder = clipFolder.addFolder('ボックス')
 boxFolder.add(clipSettings, 'boxEnabled').name('有効')
@@ -460,6 +504,9 @@ async function openCloud(loader: () => Promise<PotreeV2PointCloud>, source: stri
     cloud = next
     updateFetchStats()
     updateTiming()
+    next.material.color.set(settings.solidColor)
+    next.material.intensityGamma = settings.intensityGamma
+    applyColorType(next)
     scene.add(next.group)
     fitCloud(next)
     applyClipping()
@@ -469,6 +516,29 @@ async function openCloud(loader: () => Promise<PotreeV2PointCloud>, source: stri
     history.replaceState(null, '', url ? `?url=${encodeURIComponent(url)}` : location.pathname)
   } catch (error) {
     if (current === requestId) setStatus(error instanceof Error ? error.message : String(error), true)
+  }
+}
+
+/** Decoded attributes for reloads of the same data; undefined decodes the library's defaults. */
+let decodedAttributes: string[] | undefined
+
+/** Reload with `name` decoded, when the data has it and it is not decoded yet; returns true when it reloads. */
+function decodeAndReload(target: PotreeV2PointCloud, name: string): boolean {
+  if (target.material.attributes.includes(name) || !target.metadata.attributes.some(a => a.name === name)) return false
+  decodedAttributes = [...target.material.attributes, name]
+  actions.reload()
+  return true
+}
+
+/** Datasets differ in attributes, so a color type the cloud cannot show falls back to its default. */
+function applyColorType(target: PotreeV2PointCloud) {
+  const type = settings.pointColorType
+  if ((type === 'intensity' || type === 'classification') && decodeAndReload(target, type)) return
+  try {
+    target.material.colorType = settings.pointColorType
+  } catch (error) {
+    setStatus(error instanceof Error ? error.message : String(error), true)
+    colorTypeController.setValue(target.material.colorType)
   }
 }
 
@@ -483,6 +553,9 @@ function loadOptions() {
     minNodePixelSize: settings.minNodePixelSize,
     maxNodesToGPUPerFrame: settings.maxNodesToGPUPerFrame,
     showBoundingBoxes: settings.showBoundingBoxes,
+    attributes: decodedAttributes,
+    gradient: PotreeV2Gradients[settings.gradient],
+    classification,
     clipping,
     onError: (error: Error, node: string) => setStatus(`${node}: ${error.message}`, true),
   }
@@ -498,6 +571,7 @@ filesInput.addEventListener('change', () => {
     setStatus(error instanceof Error ? error.message : String(error), true)
     return
   }
+  decodedAttributes = undefined
   void openCloud(() => loadPotreeV2FromFiles(files, loadOptions()), 'ローカルファイル')
 })
 
@@ -581,6 +655,7 @@ window.addEventListener('beforeunload', () => {
   controls.dispose()
   profiler.dispose()
   edl.dispose()
+  classification.dispose()
   renderer.dispose()
   gui.destroy()
 })

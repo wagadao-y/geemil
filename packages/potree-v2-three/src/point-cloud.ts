@@ -19,6 +19,8 @@ import { PointPicker } from './picking.js';
 import type { PickHit, PickTarget } from './picking.js';
 import { PotreeV2PointMaterial } from './material.js';
 import type { PotreeV2PointShape } from './material.js';
+import { colorTypeAttribute, PotreeV2Gradients } from './point-color.js';
+import type { PotreeV2Classification, PotreeV2Gradient, PotreeV2PointColorType } from './point-color.js';
 import { densityLevelOffset, VisibleNodesTexture } from './point-size.js';
 import type { PotreeV2PointSizeType } from './point-size.js';
 import {
@@ -57,6 +59,19 @@ export interface PotreeV2Options {
   minPointSize?: number;
   /** Upper point size limit in CSS pixels for `attenuated` and `adaptive`. Default: 50, as in Potree. */
   maxPointSize?: number;
+  /**
+   * How points are colored. Its attribute is decoded even when `attributes` omits it.
+   * Default: `'rgb'` when rgb is decoded, otherwise `'elevation'`.
+   */
+  pointColorType?: PotreeV2PointColorType;
+  /** Gradient of `elevation`. Default: PotreeV2Gradients.SPECTRAL, as in Potree. */
+  gradient?: PotreeV2Gradient;
+  /** metadata.json z range of `elevation`. Default: the bounding box's z range. */
+  elevationRange?: [number, number];
+  /** Intensity range of `intensity`. Default: the metadata's intensity min and max, otherwise 0 to 65535. */
+  intensityRange?: [number, number];
+  /** Class colors and visibility; one scheme can be shared by several clouds. Default: a new one with Potree's colors. */
+  classification?: PotreeV2Classification;
   /** Show boxes around currently displayed nodes. Default: false. */
   showBoundingBoxes?: boolean;
   /** Clip boxes and planes; one PotreeV2Clipping can be shared by several clouds. Default: null. */
@@ -183,13 +198,22 @@ function defaultDecoderWorkers(): number {
   return Math.min(4, Math.max(1, (cores ?? 4) - 1));
 }
 
-function resolveDecodedAttributes(metadata: PotreeV2Metadata, requested?: string[]): string[] {
+function resolveDecodedAttributes(metadata: PotreeV2Metadata, requested?: string[], colorType?: PotreeV2PointColorType): string[] {
   const available = new Set(metadata.attributes.map(a => a.name));
-  for (const name of requested ?? []) {
+  const colorAttribute = colorType && colorTypeAttribute(colorType);
+  for (const name of [...requested ?? [], ...colorAttribute ? [colorAttribute] : []]) {
     if (!available.has(name)) throw new Error(`Potree v2 metadata has no attribute: ${name}`);
   }
-  const names = new Set(['position', ...(requested ?? DEFAULT_DECODED_ATTRIBUTES)]);
+  const names = new Set(['position', ...(requested ?? DEFAULT_DECODED_ATTRIBUTES), ...colorAttribute ? [colorAttribute] : []]);
   return [...names].filter(name => available.has(name));
+}
+
+function defaultIntensityRange(metadata: PotreeV2Metadata): [number, number] {
+  const attribute = metadata.attributes.find(a => a.name === 'intensity');
+  const min = attribute?.min?.[0];
+  const max = attribute?.max?.[0];
+  return min !== undefined && max !== undefined && Number.isFinite(min) && Number.isFinite(max) && max > min
+    ? [min, max] : [0, 65535];
 }
 
 /** One cloud's part of an update that may traverse several clouds together. */
@@ -375,7 +399,7 @@ export class PotreeV2PointCloud {
   private disposed = false;
 
   private constructor(url: URL, metadata: PotreeV2Metadata, options: PotreeV2Options) {
-    this.decodedAttributes = resolveDecodedAttributes(metadata, options.attributes);
+    this.decodedAttributes = resolveDecodedAttributes(metadata, options.attributes, options.pointColorType);
     this.metadataUrl = url;
     this.metadata = metadata;
     this.root = createRoot(metadata);
@@ -409,7 +433,13 @@ export class PotreeV2PointCloud {
       size: options.pointSize ?? 2, shape: options.pointShape ?? 'square',
       sizeType: options.pointSizeType ?? 'fixed',
       minSize: options.minPointSize ?? 2, maxSize: options.maxPointSize ?? 50,
-      spacing: metadata.spacing, visibleNodes: this.visibleNodes, vertexColors: this.decodedAttributes.includes('rgb'),
+      spacing: metadata.spacing, visibleNodes: this.visibleNodes, attributes: this.decodedAttributes,
+      colorType: options.pointColorType ?? (this.decodedAttributes.includes('rgb') ? 'rgb' : 'elevation'),
+      sourceOriginZ: metadata.boundingBox.min[2],
+      elevationRange: options.elevationRange ?? [metadata.boundingBox.min[2], metadata.boundingBox.max[2]],
+      intensityRange: options.intensityRange ?? defaultIntensityRange(metadata),
+      gradient: options.gradient ?? PotreeV2Gradients.SPECTRAL,
+      classification: options.classification,
     });
     this.group.name = metadata.name ?? 'Potree v2 point cloud';
   }

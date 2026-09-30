@@ -248,8 +248,9 @@ test('loads metadata, hierarchy and root through HTTP ranges', async () => {
   cloud.pointBudget = 2_000_000;
   assert.equal(cloud.group.children.length, 1);
   assert.equal(cloud.worldOffset.x, 100);
-  assert.match(cloud.material.vertexShader, /lessThanEqual\(vColor\.rgb, vec3\(0\.04045\)\)/);
-  assert.equal(cloud.material.vertexColors, true);
+  assert.match(cloud.material.vertexShader, /lessThanEqual\(c, vec3\(0\.04045\)\)/);
+  assert.equal(cloud.material.colorType, 'rgb');
+  assert.equal(cloud.material.defines.POINT_COLOR_RGB, '');
   assert.equal(cloud.material.size, 2);
   const camera = new PerspectiveCamera(60, 1, 0.1, 100);
   camera.position.set(4, 4, 20);
@@ -768,6 +769,9 @@ test('decodes only position and rgb by default and skips other attributes', asyn
   const selected = await decodeNode(data.buffer, node, intensityMetadata, ['position', 'intensity']);
   assert.deepEqual(Object.keys(selected.attributes).sort(), ['intensity', 'position']);
   assert.deepEqual([...selected.getAttribute('intensity').array], [0x1234]);
+  // 16-bit integers keep their type instead of becoming floats.
+  assert.ok(selected.getAttribute('intensity').array instanceof Uint16Array);
+  assert.equal(selected.getAttribute('intensity').normalized, false);
   selected.dispose();
 });
 
@@ -900,9 +904,18 @@ test('attributes option selects decoded attributes and rejects unknown names', a
     const geometry = cloud.group.children[0].geometry;
     assert.deepEqual(Object.keys(geometry.attributes).sort(), ['intensity', 'position']);
     assert.deepEqual([...geometry.getAttribute('intensity').array], [7]);
-    assert.equal(cloud.material.vertexColors, false);
+    assert.equal(cloud.material.colorType, 'elevation');
   } finally {
     cloud.dispose();
+  }
+  // A color type adds its own attribute to the default ones.
+  const colored = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, pointColorType: 'intensity' });
+  try {
+    assert.deepEqual(Object.keys(colored.group.children[0].geometry.attributes).sort(), ['color', 'intensity', 'position']);
+    assert.equal(colored.material.colorType, 'intensity');
+    assert.throws(() => { colored.material.colorType = 'classification'; }, /classification/);
+  } finally {
+    colored.dispose();
   }
   await assert.rejects(
     loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, attributes: ['Intensity'] }),

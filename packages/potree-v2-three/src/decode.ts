@@ -30,16 +30,25 @@ const typedArrays: Partial<Record<PotreeAttributeType, NumberArrayConstructor>> 
 const littleEndian = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 
 /**
- * Decode an attribute other than position and rgb into floats. `start` is the byte
- * offset of the first point's value and `pointStride` the bytes between points.
+ * 8- and 16-bit integers keep their type: WebGL reads them as float attributes without
+ * normalization, in a half or a quarter of the memory.
+ */
+const compactArrays: Partial<Record<PotreeAttributeType, new (length: number) => DecodedArray>> = {
+  int8: Int8Array, uint8: Uint8Array, int16: Int16Array, uint16: Uint16Array,
+};
+
+/**
+ * Decode an attribute other than position and rgb into floats, or into its own type for
+ * 8- and 16-bit integers. `start` is the byte offset of the first point's value and
+ * `pointStride` the bytes between points.
  */
 function decodeGenericAttribute(
   data: Uint8Array, view: DataView, attribute: PotreeAttribute, pointCount: number,
   start: number, pointStride: number,
-): Float32Array {
+): DecodedArray {
   const { numElements, elementSize, type } = attribute;
   const count = pointCount * numElements;
-  const values = new Float32Array(count);
+  const values = new (compactArrays[type] ?? Float32Array)(count);
   // Preserve useful precision for 64-bit scalar values in a GPU float attribute.
   const min = attribute.min?.[0];
   const max = attribute.max?.[0];
@@ -92,8 +101,10 @@ function storageSize(attribute: PotreeAttribute, compressed: boolean): number {
   return attribute.size;
 }
 
+export type DecodedArray = Float32Array | Uint8Array | Int8Array | Uint16Array | Int16Array;
+
 export interface DecodedAttribute {
-  array: Float32Array | Uint8Array;
+  array: DecodedArray;
   itemSize: number;
   normalized: boolean;
 }

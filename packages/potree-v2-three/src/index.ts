@@ -9,6 +9,8 @@ export { PotreeV2Clipping, PotreeV2ClipBox, PotreeV2ClipPlane } from './clipping
 export type { PotreeV2ClipBoxMode, PotreeV2ClipBoxOptions, PotreeV2ClipPlaneOptions } from './clipping.js';
 export type { PotreeV2PointMaterial, PotreeV2PointShape } from './material.js';
 export type { PotreeV2PointSizeType } from './point-size.js';
+export { PotreeV2Classification, PotreeV2Gradients, DEFAULT_CLASS_COLOR, DEFAULT_CLASS_COLORS } from './point-color.js';
+export type { PotreeV2ClassStyle, PotreeV2Gradient, PotreeV2PointColorType } from './point-color.js';
 export type {
   PotreeV2Options, PotreeV2LoadDiagnostics, PotreeV2FetchStats, PotreeV2PickOptions, PotreeV2PickResult,
 } from './point-cloud.js';

@@ -114,7 +114,7 @@ const cloud = await loadPotreeV2FromFiles(input.files!);
 scene.add(cloud.group);
 ```
 
-初期状態では `position` と `rgb`（metadata にある場合）だけを復号し、GPU に送ります。ほかの属性を独自のマテリアルなどで使う場合は、`attributes` オプションで復号する属性名を指定します。この指定は初期値を置き換えるので、色も必要なら `rgb` を含めてください。`position` は常に復号します。metadata にない名前を指定すると読み込みはエラーになります。
+初期状態では `position` と `rgb`（metadata にある場合）だけを復号し、GPU に送ります。強度や分類で色を付ける場合や、ほかの属性を独自のマテリアルなどで使う場合は、`attributes` オプションで復号する属性名を指定します。この指定は初期値を置き換えるので、色も必要なら `rgb` を含めてください。`position` と、`pointColorType` で指定した色の種類が使う属性は常に復号します。metadata にない名前を指定すると読み込みはエラーになります。
 
 ```ts
 const cloud = await loadPotreeV2('/pointcloud/metadata.json', {
@@ -122,7 +122,7 @@ const cloud = await loadPotreeV2('/pointcloud/metadata.json', {
 });
 ```
 
-各ノードの `Points` は `position` をノードの bounding box の最小値に置き、`position` attribute はそこからの相対座標（float32）で持ちます。大きな平行移動は double 精度の行列側で打ち消されるので、ノードが細かくなるほど座標の精度が上がります。独自のシェーダーでは `modelMatrix` を通して座標を扱ってください。`rgb` は `color` attribute（`Uint8` の RGBA、正規化、alpha は常に 255）に格納し、点色として表示します。Potree の RGB 値は sRGB として扱い、シェーダー内で線形色へ変換してから Three.js の出力色変換に渡します。`rgb` と `position` 以外で指定した属性は `BufferGeometry` の同名 attribute に格納します。64-bit の単一値属性は GPU の float 精度に合わせて metadata の min/max で 0～1 に正規化します。
+各ノードの `Points` は `position` をノードの bounding box の最小値に置き、`position` attribute はそこからの相対座標（float32）で持ちます。大きな平行移動は double 精度の行列側で打ち消されるので、ノードが細かくなるほど座標の精度が上がります。独自のシェーダーでは `modelMatrix` を通して座標を扱ってください。`rgb` は `color` attribute（`Uint8` の RGBA、正規化、alpha は常に 255）に格納し、点色として表示します。Potree の RGB 値は sRGB として扱い、シェーダー内で線形色へ変換してから Three.js の出力色変換に渡します。`rgb` と `position` 以外で指定した属性は `BufferGeometry` の同名 attribute に格納します。8・16 bit の整数属性は元の型の配列（`Uint16Array` など、正規化なし）のままにし、それ以外は `Float32Array` にします。シェーダーではどちらも `float` の attribute として読めます。64-bit の単一値属性は GPU の float 精度に合わせて metadata の min/max で 0～1 に正規化します。
 
 `metadata.json`、`hierarchy.bin`、`octree.bin` の取得はメインスレッドで行います。認証や独自の通信処理が必要なら `fetch` オプションで差し替えられます。近接するノードは1回の Range リクエストにまとめ、取得した `ArrayBuffer` をコピーせず Worker に転送します。Worker プールが Brotli 展開と点属性の復号を行い、描画側でジオメトリを組み立てます。ローカルファイルはメインスレッドで `Blob.slice()` から読みます。Web Worker が利用できない環境ではメインスレッドで復号します。
 
@@ -182,6 +182,55 @@ clipping.remove(cut);
 `'attenuated'` と `'adaptive'` では、大きさを `material.minSize`〜`material.maxSize`（CSS px、既定は Potree と同じ 2〜50、オプションは `minPointSize`・`maxPointSize`）に収めます。`size` は 1 前後が目安です。
 
 `'adaptive'` は Potree と同じく、表示中のノードの木を整数テクスチャに書き込み、頂点シェーダーが点の位置から子ノードをたどって最も深い表示ノードのレベルを求めます。加算型の LOD でも、親ノードの点は子ノードが表示されている領域では子ノードの点と同じ大きさになり、粗い点が細かい点を覆いません。オクツリーは点が少なくなった所で分割を止めるので、スキャンデータでは浅いレベルの葉ノードも周囲の深いノードと同じくらい密なことがよくあります。レベルだけで大きさを決めるとそうした葉ノードの点が数倍大きくなるため、Potree の lodOffset と同じく、ノードを読み込んだときに 32³ の格子で 1 セルあたりの点数を数えて実際の点間隔を推定し、レベルを補正します。補正量は PotreeConverter 2 のデータで Potree と一致するので、同じ `size` なら Potree と同じ大きさになります。テクスチャは表示ノードが変わった `update()` でだけ作り直します。ピックも同じ計算で描画するので、見た目どおりの範囲に当たります。
+
+## 点の色
+
+`material.colorType`（オプションは `pointColorType`）で、点の色の付け方を選べます。既定は `rgb` を復号していれば `'rgb'`、なければ `'elevation'` です。変えるとシェーダーをコンパイルし直しますが、読み込み済みのノードはそのまま使えます。
+
+| `colorType` | 使う属性 | 色 |
+|---|---|---|
+| `'rgb'` | `rgb` | 点の RGB |
+| `'solid'` | なし | `material.color`（既定は白） |
+| `'elevation'` | なし | metadata.json の z 座標を `material.elevationRange` の範囲で `material.gradient` に当てはめた色 |
+| `'intensity'` | `intensity` | `material.intensityRange` を黒〜白に対応させ、`material.intensityGamma` 乗した灰色 |
+| `'classification'` | `classification` | `material.classification` に登録したクラスごとの色 |
+
+復号する属性は読み込み時に決まり、使う属性を復号していない色の種類を指定するとエラーになります。`pointColorType` で指定した色の種類が使う属性は自動で復号しますが、読み込み後に `'intensity'` や `'classification'` へ切り替えるなら、`attributes` オプションにその属性を含めてください。
+
+```ts
+import { PotreeV2Classification, PotreeV2Gradients } from '@geemil/potree-v2-three';
+
+cloud.material.colorType = 'elevation';
+cloud.material.gradient = PotreeV2Gradients.VIRIDIS; // or [[0, '#000080'], [0.5, 'white'], [1, 'red']]
+cloud.material.elevationRange = [12.5, 48];
+
+cloud.material.colorType = 'intensity';
+cloud.material.intensityRange = [0, 4096];
+cloud.material.intensityGamma = 0.5; // 暗い点を明るくする
+
+cloud.material.colorType = 'solid';
+cloud.material.color.set('#ffcc00');
+```
+
+- `elevationRange` の既定値は bounding box の z の範囲です。範囲外の点はグラデーションの端の色になります。z は metadata.json の座標系で、`group` の変換の影響を受けません。
+- `intensityRange` の既定値は metadata にある `intensity` の min/max で、なければ 0〜65535 です。
+- `gradient` の既定値は Potree と同じ `PotreeV2Gradients.SPECTRAL` です。ほかに `VIRIDIS`、`INFERNO`、`RAINBOW`、`GRAYSCALE` があります。位置 0〜1 と色の組を渡せば独自のグラデーションも作れ、色の間は CSS のグラデーションと同じく sRGB で補間します。
+- RGB と強度の値は Potree と同じく sRGB の値として扱い、グラデーションとクラスの色も sRGB で指定します。
+
+### 分類
+
+`PotreeV2Classification` はクラス番号（0〜255）ごとの色と表示・非表示を持ちます。初期値は Potree と同じ ASPRS LAS の配色です（地面は茶、植生は緑、建物は橙、ノイズは紫、水面は青など。一覧にない番号は青緑）。点群ごとに 1 つずつ作られますが、オプションの `classification` や `material.classification` に同じものを渡せば複数の点群で共有できます。
+
+```ts
+const classification = new PotreeV2Classification({ 6: { color: '#ff4040' } });
+const cloud = await loadPotreeV2(url, { classification });
+
+classification.setVisible(7, false); // ノイズを隠す
+classification.setColor(2, 'saddlebrown');
+classification.reset(); // Potree の配色に戻し、すべて表示する
+```
+
+非表示にしたクラスの点は色の種類によらず描画せず、ピックでも当たりません。`classification` を復号していない点群では何もしないので、RGB などで表示しながらクラスを隠すには `attributes` に `classification` を含めてください。変更は次の描画で反映されます。クリッピングと違い、ノードの選択や読み込みは減りません。
 
 ## EDL（Eye-Dome Lighting）
 

@@ -2,10 +2,11 @@ import {
   BufferGeometry, Color, Frustum, GLSL3, Matrix4, NearestFilter, Points, RGBAIntegerFormat, Scene,
   ShaderMaterial, UnsignedIntType, Vector2, WebGLRenderTarget,
 } from 'three';
-import type { Camera, OrthographicCamera, PerspectiveCamera, WebGLRenderer } from 'three';
+import type { Camera, OrthographicCamera, PerspectiveCamera, Texture, WebGLRenderer } from 'three';
 import type { OctreeNode } from './format.js';
 import { ClipUniforms, clipVertex, clipVertexPars } from './clipping.js';
 import type { NodeClip } from './clipping.js';
+import { classificationDefines, classificationVertex, classificationVertexPars } from './point-color.js';
 import { pointShapeDefines, pointShapeFragment } from './material.js';
 import type { PotreeV2PointMaterial, PotreeV2PointShape } from './material.js';
 import { PointSizeUniforms, pointSizeDefines, pointSizeVertexPars } from './point-size.js';
@@ -30,6 +31,7 @@ export interface PickHit {
 const vertexShader = /* glsl */`
 ${pointSizeVertexPars}
 ${clipVertexPars}
+${classificationVertexPars}
 flat out highp uint vIndex;
 void main() {
   // Each node is one non-indexed Points object drawn from vertex 0, so the
@@ -38,6 +40,7 @@ void main() {
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   gl_PointSize = pointSize();
   ${clipVertex}
+  ${classificationVertex}
 }`;
 
 const fragmentShader = /* glsl */`
@@ -76,11 +79,17 @@ export class PointPicker {
   private readonly material = new ShaderMaterial({
     glslVersion: GLSL3,
     vertexShader, fragmentShader,
-    uniforms: { nodeId: { value: 0 }, ...this.pointSize.uniforms, ...this.clip.uniforms },
-    defines: { ...this.clip.defines, ...pointShapeDefines('square'), ...pointSizeDefines('fixed') },
+    uniforms: {
+      nodeId: { value: 0 }, classificationStyles: { value: null as Texture | null },
+      ...this.pointSize.uniforms, ...this.clip.uniforms,
+    },
+    defines: {
+      ...this.clip.defines, ...pointShapeDefines('square'), ...pointSizeDefines('fixed'), ...classificationDefines(false),
+    },
   });
   private shape: PotreeV2PointShape = 'square';
   private sizeType: PotreeV2PointSizeType = 'fixed';
+  private classified = false;
   /** The display material of the current pick, for the per-node visible-node indices. */
   private display?: PotreeV2PointMaterial;
   // RGBA_INTEGER/UNSIGNED_INT is the read format WebGL2 guarantees for unsigned
@@ -130,6 +139,14 @@ export class PointPicker {
       this.material.defines = { ...this.material.defines, ...pointSizeDefines(sizeType) };
       this.material.needsUpdate = true;
     }
+    // Points of hidden classes are not hit, as they are not drawn.
+    const classified = display.attributes.includes('classification');
+    if (classified !== this.classified) {
+      this.classified = classified;
+      this.material.defines = { ...this.material.defines, ...classificationDefines(classified) };
+      this.material.needsUpdate = true;
+    }
+    this.material.uniforms.classificationStyles!.value = display.classification.texture;
     const gl = renderer.getContext();
     if (!(gl instanceof WebGL2RenderingContext) || gl.isContextLost()) return null;
     const pixelRatio = renderer.getPixelRatio();
