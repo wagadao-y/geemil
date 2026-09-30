@@ -17,8 +17,9 @@ async function waitFor(predicate) {
   assert.fail('Timed out waiting for background node load');
 }
 
+// PotreeConverter writes DEFAULT for uncompressed output unless --encoding is given.
 const base = {
-  version: '2.0', encoding: 'UNCOMPRESSED', points: 2, spacing: 1,
+  version: '2.0', encoding: 'DEFAULT', points: 2, spacing: 1,
   scale: [0.5, 0.5, 0.5], offset: [100, 200, 300],
   boundingBox: { min: [100, 200, 300], max: [108, 208, 308] },
   hierarchy: { firstChunkSize: 44 },
@@ -66,6 +67,13 @@ function morton(x, y, z, bits) {
 
 test('rejects metadata outside Potree v2', () => {
   assert.throws(() => validateMetadata({ ...base, version: '3.0' }), /Expected Potree v2/);
+});
+
+test('accepts the encodings PotreeConverter writes and rejects others', () => {
+  for (const encoding of ['DEFAULT', 'BROTLI']) {
+    assert.equal(validateMetadata({ ...base, encoding }).encoding, encoding);
+  }
+  assert.throws(() => validateMetadata({ ...base, encoding: 'UNCOMPRESSED' }), /Unsupported Potree v2 encoding: UNCOMPRESSED/);
 });
 
 test('parses child boxes and proxy hierarchy chunks', () => {
@@ -870,7 +878,7 @@ function assertGenericValues(geometry, pointCount, seed = 0) {
   }
 }
 
-for (const encoding of ['UNCOMPRESSED', 'BROTLI']) {
+for (const encoding of ['DEFAULT', 'BROTLI']) {
   test(`decodes generic ${encoding} attributes of every layout`, async () => {
     const { metadata, node, bytes } = genericNode(encoding, 3);
     const geometry = await decodeNode(bytes, node, metadata, ['position', ...genericNames]);

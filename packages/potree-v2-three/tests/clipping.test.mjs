@@ -142,7 +142,7 @@ test('shader uniforms apply keep, hide and plane clips in node-local float32 coo
 });
 
 const base = {
-  version: '2.0', encoding: 'UNCOMPRESSED', points: 4, spacing: 1,
+  version: '2.0', encoding: 'DEFAULT', points: 4, spacing: 1,
   scale: [0.5, 0.5, 0.5], offset: [100, 200, 300],
   boundingBox: { min: [100, 200, 300], max: [108, 208, 308] },
   hierarchy: { firstChunkSize: 88 },

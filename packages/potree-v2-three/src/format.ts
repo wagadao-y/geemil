@@ -20,7 +20,11 @@ export interface PotreeAttribute {
 export interface PotreeV2Metadata {
   version: string;
   name?: string;
-  encoding: 'UNCOMPRESSED' | 'BROTLI';
+  /**
+   * `DEFAULT` stores the points uncompressed and `BROTLI` compresses them, as PotreeConverter
+   * writes and Potree reads them.
+   */
+  encoding: 'DEFAULT' | 'BROTLI';
   projection?: string;
   points: number;
   spacing: number;
@@ -123,8 +127,8 @@ export function validateMetadata(value: unknown): PotreeV2Metadata {
   if (typeof value !== 'object' || value === null) throw new Error('Invalid Potree metadata');
   const m = value as PotreeV2Metadata;
   if (m.version !== '2.0') throw new Error(`Expected Potree v2 metadata, got ${String(m.version)}`);
-  if (m.encoding !== 'BROTLI' && m.encoding !== 'UNCOMPRESSED') {
-    throw new Error(`Unsupported Potree v2 encoding: ${String(m.encoding)}`);
+  if (m.encoding !== 'BROTLI' && m.encoding !== 'DEFAULT') {
+    throw new Error(`Unsupported Potree v2 encoding: ${String(m.encoding)} (supported: DEFAULT, BROTLI)`);
   }
   if (!Array.isArray(m.attributes) || !m.attributes.some(a => a.name === 'position')) {
     throw new Error('Potree v2 metadata has no position attribute');

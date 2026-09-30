@@ -172,13 +172,13 @@ function decodeAttributes(
   }
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const attributes: DecodedNodeData = {};
-  // UNCOMPRESSED stores points interleaved; BROTLI stores one column per attribute.
+  // DEFAULT stores points interleaved; BROTLI stores one column per attribute.
   const stride = compressed ? 0 : pointSize;
   let attributeOffset = 0;
   for (const attribute of metadata.attributes) {
     const size = storageSize(attribute, compressed);
     if (!wanted.has(attribute.name)) {
-      // Skip the column (BROTLI) or field (UNCOMPRESSED) without decoding it.
+      // Skip the column (BROTLI) or field (uncompressed) without decoding it.
       attributeOffset += compressed ? size * pointCount : size;
       continue;
     }

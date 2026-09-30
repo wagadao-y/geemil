@@ -2,6 +2,8 @@
 
 PotreeConverter **2.0** の `metadata.json`, `hierarchy.bin`, `octree.bin` を Three.js で表示するライブラリです。Potree v1 と Potree-Next v3 は対象外です。
 
+`metadata.json` の `encoding` は、無圧縮の `DEFAULT` と Brotli 圧縮の `BROTLI` に対応しています。それ以外の値は読み込み時にエラーになります。
+
 ## 使い方
 
 ```ts
@@ -56,7 +58,7 @@ HTTP 429（Too Many Requests）と 503（Service Unavailable）は、ノード�
 
 HTTP のエラーは `HttpError`（`status` と `retryAfterMs` を持ちます）として `onError` に渡されるので、404 などの内容に応じて処理を分けられます。
 
-キャッシュは二段階です。復号済みジオメトリは、表示中の `pointBudget` の2倍の点数まで保持し、超過時に非表示ノードを古い順に破棄します。この上限は `pointBudget` の変更に追従し、`cachePointBudget` で固定値に上書きできます。BROTLI の URL データは、復号前のノードも LRU で最大 128 MiB 保持します。上限は `encodedCacheByteBudget`（バイト数）で変更でき、`0` で無効になります。UNCOMPRESSED データとローカルファイルは初期状態では復号前のキャッシュを使いません。復号前のキャッシュに残っているノードは再取得せず、Worker で再デコードします。
+キャッシュは二段階です。復号済みジオメトリは、表示中の `pointBudget` の2倍の点数まで保持し、超過時に非表示ノードを古い順に破棄します。この上限は `pointBudget` の変更に追従し、`cachePointBudget` で固定値に上書きできます。BROTLI の URL データは、復号前のノードも LRU で最大 128 MiB 保持します。上限は `encodedCacheByteBudget`（バイト数）で変更でき、`0` で無効になります。無圧縮（`DEFAULT`）のデータとローカルファイルは初期状態では復号前のキャッシュを使いません。復号前のキャッシュに残っているノードは再取得せず、Worker で再デコードします。
 
 `cloud.fetchStats` で成功した octree Range 取得回数 (`rangeRequests`) と取得ノード数 (`fetchedNodes`) を参照できます。復号前キャッシュからの再デコードは含みません。`cloud.clearFetchStats()` で両方を 0 に戻せます。クリア時点で進行中だった取得は、新しいカウントに含めません。
 

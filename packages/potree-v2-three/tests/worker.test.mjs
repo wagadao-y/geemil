@@ -8,7 +8,7 @@ import { makeNodeBatches } from '../dist/batches.js';
 import { fetchRange } from '../dist/http.js';
 
 const metadata = {
-  version: '2.0', encoding: 'UNCOMPRESSED', points: 1, spacing: 1,
+  version: '2.0', encoding: 'DEFAULT', points: 1, spacing: 1,
   scale: [1, 1, 1], offset: [0, 0, 0],
   boundingBox: { min: [0, 0, 0], max: [8, 8, 8] },
   hierarchy: { firstChunkSize: 22 },
