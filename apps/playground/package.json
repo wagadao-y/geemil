@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc && vite build",
+    "build": "tsc && tsc -p tsconfig.e2e.json && vite build",
     "preview": "vite preview",
     "test:browser": "playwright test"
   },
@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",
+    "@types/node": "^24.19.0",
     "@types/three": "^0.180.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"

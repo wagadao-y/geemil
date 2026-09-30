@@ -1,0 +1,8 @@
+{
+  // The Playwright tests and their config: the harness runs in the browser, the rest in Node.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["e2e", "playwright.config.ts"]
+}

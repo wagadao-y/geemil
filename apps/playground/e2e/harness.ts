@@ -197,7 +197,7 @@ const harness = {
 }
 
 /** Draw the view and read back its RGBA pixels. */
-function render(): Uint8Array {
+function render(): Uint8Array<ArrayBuffer> {
   renderer.render(scene, camera)
   const pixels = new Uint8Array(SIZE * SIZE * 4)
   gl.readPixels(0, 0, SIZE, SIZE, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
