@@ -53,14 +53,23 @@ export class RenderProfiler {
       query = gl.createQuery()
       if (query) gl.beginQuery(ext.TIME_ELAPSED_EXT, query)
     }
+    // One frame may call renderer.render several times (EDL does), so sum them all.
+    const info = this.renderer.info
+    const autoReset = info.autoReset
+    info.autoReset = false
+    info.reset()
     const startedAt = performance.now()
-    render()
+    try {
+      render()
+    } finally {
+      info.autoReset = autoReset
+    }
     const endedAt = performance.now()
     if (query) {
       gl.endQuery(ext!.TIME_ELAPSED_EXT)
       this.pending.push(query)
     }
-    // renderer.info is reset by every render, so read it before a pick renders.
+    // renderer.info is reset by every later render, so read it before a pick renders.
     this.drawCalls = this.renderer.info.render.calls
     this.points = this.renderer.info.render.points
     this.cpuSum += endedAt - startedAt
