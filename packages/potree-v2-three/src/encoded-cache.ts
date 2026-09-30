@@ -10,6 +10,9 @@ export class EncodedNodeCache {
   get bytes(): number { return this.usedBytes; }
   get size(): number { return this.entries.size; }
 
+  /** Whether `node` is cached, without marking it as recently used. */
+  has(node: OctreeNode): boolean { return this.entries.has(node); }
+
   get(node: OctreeNode): ArrayBuffer | undefined {
     const bytes = this.entries.get(node);
     if (bytes) {

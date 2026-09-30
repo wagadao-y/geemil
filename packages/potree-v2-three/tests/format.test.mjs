@@ -1163,6 +1163,43 @@ test('batches being fetched count against the decode backlog', async () => {
   }
 });
 
+test('a cached node between missing ones starts no more requests than the limits allow', async () => {
+  // Three adjacent children; only the middle one is in the encoded cache.
+  const metadata = { ...base, points: 4, hierarchy: { firstChunkSize: 88 } };
+  const files = {
+    'metadata.json': JSON.stringify(metadata),
+    'hierarchy.bin': concat(record(1, 7, 1, 0, 18), record(0, 0, 1, 18, 18), record(0, 0, 1, 36, 18), record(0, 0, 1, 54, 18)),
+    'octree.bin': new Uint8Array(72),
+  };
+  const { fetcher: files206 } = flakyCloudFetcher(files, {});
+  let hold = false;
+  const held = [];
+  const fetcher = (url, init = {}) => {
+    if (!hold || !url.pathname?.endsWith('octree.bin')) return files206(url, init);
+    return new Promise(resolve => held.push(() => resolve(files206(url, init))));
+  };
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher, maxConcurrentLoads: 1, encodedCacheByteBudget: 1024,
+  });
+  try {
+    const children = cloud.root.children.filter(Boolean);
+    await cloud.loadBatch([children[1]]);
+    cloud.decodedQueue.length = 0;
+    cloud.states.get(children[1]).queued = false;
+    hold = true;
+    cloud.constructor.requestBatches([{ cloud, pending: children }], cloud.ownLimits());
+    // The missing neighbours are two ranges; one request slot starts one of them, and the
+    // cached node is decoded without a request.
+    assert.equal(held.length, 1);
+    await waitFor(() => cloud.decodedQueue.length === 1);
+    assert.equal(cloud.decodedQueue[0].node, children[1]);
+    held.splice(0).forEach(release => release());
+    await waitFor(() => cloud.decodedQueue.length === 2);
+  } finally {
+    cloud.dispose();
+  }
+});
+
 test('update skips unchanged settled views and reports scene changes', async () => {
   const { fetcher } = flakyCloudFetcher(childFiles, {});
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, minNodePixelSize: 1 });

@@ -284,7 +284,14 @@ export let updatePointClouds: (
 type DecodedQueueItem = { node: OctreeNode; attributes: DecodedNodeData; occupancy?: number; rank: number };
 
 /** An octree batch a cloud could request now; `rank` orders plans across clouds. */
-type BatchPlan = { cloud: PotreeV2PointCloud; batch: NodeBatch; rank: number };
+type BatchPlan = {
+  cloud: PotreeV2PointCloud; nodes: OctreeNode[]; rank: number;
+  /** Decoded from the encoded cache as one job, without a request. Otherwise one octree range. */
+  cached: boolean;
+};
+
+/** Nodes of the encoded cache decoded as one job, as many as a range batch holds at most. */
+const MAX_CACHED_PLAN_NODES = 16;
 
 /** Bound on decoded nodes waiting for installation before a cloud stops requesting more. */
 const MAX_DECODED_QUEUE = 32;
@@ -532,7 +539,9 @@ export class PotreeV2PointCloud {
       await gate.retry(() => cloud.loadHierarchy(cloud.root), LOAD_ATTEMPTS, signal);
       if (cloud.root.numPoints > 0) {
         await gate.retry(async () => {
-          const [failure] = await cloud.loadBatch([cloud.root]);
+          // Like update()'s batches, wait for room in the shared decoder backlog first.
+          const release = await cloud.liveDecoder().reserveFetchWhenFree(signal);
+          const [failure] = await cloud.loadBatch([cloud.root], release);
           if (failure) throw failure.error;
         }, LOAD_ATTEMPTS, signal);
         PotreeV2PointCloud.installDecodedNodes([cloud], Infinity);
@@ -863,18 +872,22 @@ export class PotreeV2PointCloud {
   private static requestBatches(
     work: readonly { cloud: PotreeV2PointCloud; pending: OctreeNode[] }[], limits: UpdateLimits,
   ): void {
-    if (limits.slots.inFlight >= limits.maxConcurrentLoads) return;
     const plans = work.flatMap(({ cloud, pending }) => cloud.planBatches(pending));
     plans.sort((a, b) => a.rank - b.rank);
-    for (const { cloud, batch } of plans) {
-      if (limits.slots.inFlight >= limits.maxConcurrentLoads) break;
-      const decoder = cloud.liveDecoder();
-      if (cloud.gate.available() <= 0 || decoder.backlog >= decoder.maxWorkers * 2) continue;
-      cloud.startBatch(batch, limits.slots);
+    for (const plan of plans) {
+      const { cloud } = plan;
+      if (cloud.liveDecoder().full) continue;
+      // Each plan is one request or one cached decode, so these checks cover all it starts.
+      if (!plan.cached && (limits.slots.inFlight >= limits.maxConcurrentLoads || cloud.gate.available() <= 0)) continue;
+      cloud.startBatch(plan, limits.slots);
     }
   }
 
-  /** Group this cloud's first loadable nodes into batches ranked by their best selection rank. */
+  /**
+   * Group this cloud's first loadable nodes into range batches and cached decodes,
+   * ranked by their best selection rank. Cache hits are split off here, before
+   * batching, so that a plan starts exactly the work its limits were checked for.
+   */
   private planBatches(nodes: OctreeNode[]): BatchPlan[] {
     if (nodes.length === 0 || this.decodedQueue.length >= MAX_DECODED_QUEUE) return [];
     // Limit grouping work on each frame. Selection order already reflects visual priority,
@@ -888,45 +901,61 @@ export class PotreeV2PointCloud {
     }
     // Nodes outside the last selection keep the order they were given in, after selected ones.
     const rank = new Map(candidates.map((node, index) => [node, this.selectionRank.get(node) ?? 2 ** 40 + index]));
-    return makeNodeBatches(candidates).map(batch => ({
-      cloud: this, batch, rank: Math.min(...batch.nodes.map(node => rank.get(node)!)),
-    }));
+    const plan = (nodes: OctreeNode[], cached: boolean): BatchPlan => ({
+      cloud: this, nodes, cached, rank: Math.min(...nodes.map(node => rank.get(node)!)),
+    });
+    const cached = candidates.filter(node => this.encodedCache.has(node));
+    const plans = makeNodeBatches(candidates.filter(node => !this.encodedCache.has(node)))
+      .map(batch => plan(batch.nodes, false));
+    for (let i = 0; i < cached.length; i += MAX_CACHED_PLAN_NODES) {
+      plans.push(plan(cached.slice(i, i + MAX_CACHED_PLAN_NODES), true));
+    }
+    return plans;
   }
 
-  private startBatch(batch: NodeBatch, slots: LoadSlots): void {
-    slots.inFlight++;
-    this.inFlight++;
+  /**
+   * Start one plan. loadBatch() splits nodes by the encoded cache and batches them again;
+   * a plan is already split that way and is one batch, so it starts one request or one decode.
+   */
+  private startBatch({ nodes, cached }: BatchPlan, slots: LoadSlots): void {
     this.activeLoads++;
-    const request: BatchRequest = { nodes: batch.nodes, controller: new AbortController(), wantedAt: performance.now() };
-    this.fetchingRequests.add(request);
-    // Ends as the fetched bytes are submitted, when the pool's queue starts counting them.
-    const releaseDecoder = this.liveDecoder().reserveFetch();
-    let fetching = true;
-    const releaseRequest = () => {
-      if (!fetching) return;
-      fetching = false;
-      this.fetchingRequests.delete(request);
-      slots.inFlight--;
-      this.inFlight--;
-      releaseDecoder();
-    };
-    const states = batch.nodes.map(node => this.state(node));
-    const fail = (nodes: readonly OctreeNode[], error: unknown) => {
+    let releaseRequest = () => {};
+    let signal: AbortSignal | undefined;
+    if (!cached) {
+      slots.inFlight++;
+      this.inFlight++;
+      const request: BatchRequest = { nodes, controller: new AbortController(), wantedAt: performance.now() };
+      this.fetchingRequests.add(request);
+      signal = request.controller.signal;
+      // Ends as the fetched bytes are submitted, when the pool's queue starts counting them.
+      const releaseDecoder = this.liveDecoder().reserveFetch();
+      let fetching = true;
+      releaseRequest = () => {
+        if (!fetching) return;
+        fetching = false;
+        this.fetchingRequests.delete(request);
+        slots.inFlight--;
+        this.inFlight--;
+        releaseDecoder();
+      };
+    }
+    const states = nodes.map(node => this.state(node));
+    const fail = (failed: readonly OctreeNode[], error: unknown) => {
       // A throttled node is not at fault: the gate pauses the origin and update() retries it.
       if (this.disposed || isAbort(error) || isThrottled(error)) return;
-      for (const node of nodes) {
+      for (const node of failed) {
         this.noteFailure(this.state(node));
         this.onError?.(error instanceof Error ? error : new Error(String(error)), node.name);
       }
     };
-    const promise = this.loadBatch(batch.nodes, releaseRequest, request.controller.signal).then(failures => {
+    const promise = this.loadBatch(nodes, releaseRequest, signal).then(failures => {
       const failed = new Set(failures.flatMap(failure => failure.nodes));
-      for (const [index, node] of batch.nodes.entries()) {
+      for (const [index, node] of nodes.entries()) {
         if (!failed.has(node)) states[index]!.failures = 0;
       }
-      for (const { nodes, error } of failures) fail(nodes, error);
-    }, error => fail(batch.nodes, error)).finally(() => {
-      for (const [index, node] of batch.nodes.entries()) {
+      for (const failure of failures) fail(failure.nodes, failure.error);
+    }, error => fail(nodes, error)).finally(() => {
+      for (const [index, node] of nodes.entries()) {
         states[index]!.loading = undefined;
         this.releaseState(node, states[index]!);
       }
