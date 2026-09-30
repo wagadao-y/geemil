@@ -261,5 +261,6 @@ function animate() {
 
 リポジトリのルートで `pnpm install`, `pnpm dev` を実行するとライブラリの watch ビルドと playground が起動します。`pnpm build` で両方をビルド、`pnpm test` で形式の読み込みを検証します。
 
+`tests/data/pump-2000pts/` には、playground の pump を 2,000 点に間引いて PotreeConverter で変換したデータがあります。`--encoding` を付けずに変換した `default/` と、`--encoding BROTLI` で変換した `brotli/` の 2 つです。テストでは、両者が同じ点に復号されること（BROTLI はノード内の点をモートン順に並べ替えるので、順序は問いません）と、各点が pump の点と一致することを確かめます。PotreeConverter は座標を整数にするときに切り捨てるので、pump の点とは各軸 1 mm までずれることがあり、それは許容しています。ライセンスは同じディレクトリの `LICENSE.txt` を参照してください。
 
 `pnpm test:browser` は Playwright でヘッドレス Chromium を起動し、playground のテスト用ページ（`apps/playground/e2e/harness.html`）で実際に描画して検証します。色の種類ごとのシェーダーと色、分類ごとの色と、隠したクラスの描画とピック、既定で復号する属性、無圧縮（`DEFAULT`）と `BROTLI` で同じ画素になることを確かめます。テストデータは最初の実行時にサンプルの pump から `apps/playground/e2e/data/` に作ります。無圧縮に書き直したものと、分類がすべて 0 のサンプルに x 方向の帯ごとに分類（2・3・6・9・200）を割り当てたものの 2 つです。WebGL は SwiftShader で描くので GPU は要りません。devcontainer では作成時に Chromium とそのシステムライブラリを入れるので、コンテナを作り直してもそのまま実行できます。devcontainer の外では、先に `pnpm --filter playground exec playwright install --with-deps chromium` を実行してください。
