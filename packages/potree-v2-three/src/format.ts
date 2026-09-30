@@ -76,18 +76,26 @@ export function parseHierarchyChunk(root: OctreeNode, buffer: ArrayBuffer): void
     throw new Error(`Invalid Potree v2 hierarchy chunk size: ${buffer.byteLength}`);
   }
   const view = new DataView(buffer);
-  const nodes: OctreeNode[] = [root];
   const count = buffer.byteLength / 22;
+  // Validate the whole chunk before changing any node, so that a failed parse leaves the
+  // tree as it was and the chunk is fetched again instead of leaving half-built nodes.
+  let records = 1;
   for (let i = 0; i < count; i++) {
-    const node = nodes[i];
-    if (!node) throw new Error('Invalid Potree v2 hierarchy: missing child record');
+    if (i >= records) throw new Error('Invalid Potree v2 hierarchy: missing child record');
+    const type = view.getUint8(i * 22);
+    if (type > 2) throw new Error(`Invalid Potree v2 node type: ${type}`);
+    if (type !== 2) records += childCount(view.getUint8(i * 22 + 1));
+  }
+  if (records !== count) throw new Error('Invalid Potree v2 hierarchy: record count mismatch');
+  const nodes: OctreeNode[] = [root];
+  for (let i = 0; i < count; i++) {
+    const node = nodes[i]!;
     const at = i * 22;
     const type = view.getUint8(at);
     const mask = view.getUint8(at + 1);
     const points = view.getUint32(at + 2, true);
     const offset = view.getBigUint64(at + 6, true);
     const size = view.getBigUint64(at + 14, true);
-    if (type > 2) throw new Error(`Invalid Potree v2 node type: ${type}`);
     if (node.type === 2 && i === 0) {
       // The first record replaces the proxy for this chunk's root.
       node.byteOffset = offset;
@@ -114,8 +122,14 @@ export function parseHierarchyChunk(root: OctreeNode, buffer: ArrayBuffer): void
       nodes.push(childNode);
     }
   }
-  if (nodes.length !== count) throw new Error('Invalid Potree v2 hierarchy: record count mismatch');
   root.hierarchyLoaded = true;
+}
+
+/** Children in a node's child mask. */
+function childCount(mask: number): number {
+  let count = 0;
+  for (let bits = mask; bits !== 0; bits &= bits - 1) count++;
+  return count;
 }
 
 const typeSizes: Record<PotreeV2AttributeType, number> = {

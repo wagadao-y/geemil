@@ -89,6 +89,29 @@ test('parses child boxes and proxy hierarchy chunks', () => {
   assert.equal(root.children[0].type, 0);
 });
 
+test('an invalid hierarchy chunk leaves the tree unchanged so that it can be parsed again', () => {
+  const root = createRoot(base);
+  const invalid = [
+    // The root claims two children, but only one record follows.
+    [concat(record(1, 0b11, 1, 0, 18), record(0, 0, 1, 18, 18)), /record count mismatch/],
+    // A node type outside 0 to 2 after a valid record.
+    [concat(record(1, 1, 1, 0, 18), record(3, 0, 1, 18, 18)), /node type: 3/],
+    // A record without a parent that announced it.
+    [concat(record(1, 0, 1, 0, 18), record(0, 0, 1, 18, 18)), /missing child record/],
+  ];
+  for (const [chunk, error] of invalid) {
+    assert.throws(() => parseHierarchyChunk(root, chunk.buffer), error);
+    assert.equal(root.type, 2);
+    assert.equal(root.numPoints, 0);
+    assert.equal(root.byteSize, 0n);
+    assert.equal(root.children.length, 0);
+    assert.equal(root.hierarchyLoaded, false);
+  }
+  parseHierarchyChunk(root, concat(record(1, 1, 1, 0, 18), record(0, 0, 1, 18, 18)).buffer);
+  assert.equal(root.children[0].byteOffset, 18n);
+  assert.equal(root.hierarchyLoaded, true);
+});
+
 test('decodes uncompressed positions and 16-bit colors', async () => {
   const node = createRoot(base);
   node.numPoints = 1;
