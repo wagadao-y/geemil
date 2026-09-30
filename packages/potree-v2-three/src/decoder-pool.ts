@@ -22,9 +22,6 @@ type WorkerSlot = {
 
 let shared: DecoderPool | undefined;
 
-/** Poll interval of reserveFetchWhenFree() while the backlog is full. */
-const BACKLOG_POLL_MS = 16;
-
 function abortError(): Error {
   return new DOMException('Point cloud disposed', 'AbortError');
 }
@@ -64,19 +61,6 @@ export class DecoderPool {
 
   /** New batches wait while the backlog holds twice as many jobs as there are Workers. */
   get full(): boolean { return this.backlog >= this.maxWorkers * 2; }
-
-  /** reserveFetch() once the backlog has room; `signal` abandons the wait. */
-  async reserveFetchWhenFree(signal?: AbortSignal): Promise<() => void> {
-    while (this.full) {
-      if (this.disposed || signal?.aborted) throw abortError();
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, BACKLOG_POLL_MS);
-        const onAbort = () => { clearTimeout(timer); reject(abortError()); };
-        signal?.addEventListener('abort', onAbort, { once: true });
-      });
-    }
-    return this.reserveFetch();
-  }
 
   /**
    * Count a batch being fetched in the backlog, so that batches finishing together

@@ -328,3 +328,64 @@ test('loading waits for room in the shared decoder backlog before fetching the r
     globalThis.Worker = originalWorker;
   }
 });
+
+test('a load waiting for the backlog checks the new pool when the waited one fails', { timeout: 5000 }, async () => {
+  const originalWorker = globalThis.Worker;
+  const posted = [];
+  globalThis.Worker = class {
+    postMessage(message) { if (message.id !== undefined) posted.push({ worker: this, message }); }
+    terminate() {}
+  };
+  const respond = async ({ worker, message }) => {
+    const nodes = [];
+    for (const node of message.nodes) nodes.push(await decodeBatchNode(message.bytes, message.start, node, message.metadata));
+    worker.onmessage({ data: { id: message.id, nodes } });
+  };
+  const fill = pool => [0, 1].map(() => pool.decodeBatch(new ArrayBuffer(0), 0n, [], metadata));
+  const failed = DecoderPool.acquire(1);
+  const lost = fill(failed).map(job => job.catch(error => error));
+  const ranges = [];
+  const point = new Uint8Array(12);
+  const hierarchy = new Uint8Array(22);
+  const view = new DataView(hierarchy.buffer);
+  view.setUint32(2, 1, true);
+  view.setBigUint64(14, 12n, true);
+  const files = { 'hierarchy.bin': hierarchy, 'octree.bin': point };
+  const fetcher = async (url, init = {}) => {
+    const name = new URL(url).pathname.split('/').at(-1);
+    if (name === 'metadata.json') return new Response(JSON.stringify(metadata));
+    ranges.push(name);
+    const match = /bytes=(\d+)-(\d+)/.exec(init.headers.Range);
+    return new Response(files[name].slice(Number(match[1]), Number(match[2]) + 1), { status: 206 });
+  };
+  let replacement;
+  try {
+    const loading = loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, decoderWorkers: 1 });
+    await new Promise(resolve => setTimeout(resolve, 40));
+    assert.deepEqual(ranges, ['hierarchy.bin']);
+    // The waited pool fails, and its replacement is already full with another cloud's jobs.
+    failed.failWorkers(new Error('Worker crashed'));
+    await Promise.all(lost);
+    replacement = DecoderPool.acquire(1);
+    assert.notEqual(replacement, failed);
+    posted.length = 0;
+    const busy = fill(replacement);
+    await new Promise(resolve => setTimeout(resolve, 60));
+    assert.deepEqual(ranges, ['hierarchy.bin'], 'the root waits for the replacement pool');
+    for (let i = 0; i < 2; i++) {
+      await respond(posted.shift());
+      await busy[i];
+    }
+    const deadline = Date.now() + 1000;
+    while (posted.length < 1 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.deepEqual(ranges, ['hierarchy.bin', 'octree.bin']);
+    await respond(posted.shift()); // The root's job.
+    const cloud = await loading;
+    assert.equal(cloud.decoder, replacement);
+    cloud.dispose();
+  } finally {
+    replacement?.release();
+    failed.release();
+    globalThis.Worker = originalWorker;
+  }
+});

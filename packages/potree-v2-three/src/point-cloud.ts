@@ -14,7 +14,7 @@ import { EncodedNodeCache } from './encoded-cache.js';
 import { createRoot, parseHierarchyChunk, validateMetadata } from './format.js';
 import type { OctreeNode, PotreeV2Metadata } from './format.js';
 import { fetchRange, responseError } from './http.js';
-import { isThrottled, RequestGate } from './request-gate.js';
+import { isThrottled, RequestGate, sleep } from './request-gate.js';
 import { PointPicker } from './picking.js';
 import type { PickHit, PickTarget } from './picking.js';
 import { PotreeV2PointMaterial } from './material.js';
@@ -194,6 +194,8 @@ const DEFAULT_RETRY_DELAY_MS = 1000;
 const STALE_REQUEST_MS = 300;
 /** A view counts as loaded once all its nodes stayed in the scene this long. */
 const LOAD_COMPLETE_MS = 500;
+/** Poll interval while load() waits for room in the decoder backlog. */
+const BACKLOG_POLL_MS = 16;
 /** Attempts for requests made by load(), which no update loop retries. */
 const LOAD_ATTEMPTS = 6;
 
@@ -540,7 +542,7 @@ export class PotreeV2PointCloud {
       if (cloud.root.numPoints > 0) {
         await gate.retry(async () => {
           // Like update()'s batches, wait for room in the shared decoder backlog first.
-          const release = await cloud.liveDecoder().reserveFetchWhenFree(signal);
+          const release = await cloud.reserveDecoderFetch(signal);
           const [failure] = await cloud.loadBatch([cloud.root], release);
           if (failure) throw failure.error;
         }, LOAD_ATTEMPTS, signal);
@@ -616,6 +618,20 @@ export class PotreeV2PointCloud {
       this.decoder.warm(this.metadata.encoding === 'BROTLI');
     }
     return this.decoder;
+  }
+
+  /**
+   * reserveFetch() in the decoder pool once its backlog has room. The pool is looked up
+   * again on every check: a pool whose Workers fail while this waits is replaced, and
+   * the reservation must count against the pool that will decode.
+   */
+  private async reserveDecoderFetch(signal?: AbortSignal): Promise<() => void> {
+    for (;;) {
+      if (signal?.aborted) throw new DOMException('The operation was aborted', 'AbortError');
+      const decoder = this.liveDecoder();
+      if (!decoder.full) return decoder.reserveFetch();
+      await sleep(BACKLOG_POLL_MS, signal);
+    }
   }
 
   private noteDecodeTiming(timing: NodeDecodeTiming, generation: number): void {
