@@ -183,6 +183,29 @@ clipping.remove(cut);
 
 `'adaptive'` は Potree と同じく、表示中のノードの木を整数テクスチャに書き込み、頂点シェーダーが点の位置から子ノードをたどって最も深い表示ノードのレベルを求めます。加算型の LOD でも、親ノードの点は子ノードが表示されている領域では子ノードの点と同じ大きさになり、粗い点が細かい点を覆いません。オクツリーは点が少なくなった所で分割を止めるので、スキャンデータでは浅いレベルの葉ノードも周囲の深いノードと同じくらい密なことがよくあります。レベルだけで大きさを決めるとそうした葉ノードの点が数倍大きくなるため、Potree の lodOffset と同じく、ノードを読み込んだときに 32³ の格子で 1 セルあたりの点数を数えて実際の点間隔を推定し、レベルを補正します。補正量は PotreeConverter 2 のデータで Potree と一致するので、同じ `size` なら Potree と同じ大きさになります。テクスチャは表示ノードが変わった `update()` でだけ作り直します。ピックも同じ計算で描画するので、見た目どおりの範囲に当たります。
 
+## EDL（Eye-Dome Lighting）
+
+`PotreeV2EDL` は Potree と同じ Eye-Dome Lighting で、点の奥行きの差に陰影を付けて形を読み取りやすくします。`renderer.render(scene, camera)` の代わりに呼びます。
+
+```ts
+import { PotreeV2EDL } from '@geemil/potree-v2-three';
+
+const edl = new PotreeV2EDL({ strength: 0.4, radius: 1.4 }); // 既定値は Potree と同じ
+
+function animate() {
+  cloud.update(camera, viewport.clientHeight);
+  edl.render(renderer, scene, camera, [cloud]);
+}
+```
+
+`render()` は 3 回に分けて描画します。
+
+1. 点群の `group` を隠してシーンを描きます。`renderer.autoClear` と背景はふだんどおり働きます。
+2. 点群とその祖先だけを残してシーンを描き直し、色と深度をオフスクリーンのターゲットに描きます。シーンを通して描くので、親の変換とフォグもそのまま効きます。
+3. 深度から周囲 8 点との log 深度の差を求めて陰影を付け、点群の深度も書き込んで合成します。点群と他の物体の前後関係はそのまま保たれます。
+
+`strength` と `radius`（CSS px）はいつでも変えられます。点群の `group` の下にあるものはすべて陰影の対象になり、ノードの bbox 表示も含まれます。透視・平行投影のカメラと、`logarithmicDepthBuffer` に対応しています。`reversedDepthBuffer` には対応していません。
+
 ## 開発
 
 リポジトリのルートで `pnpm install`, `pnpm dev` を実行するとライブラリの watch ビルドと playground が起動します。`pnpm build` で両方をビルド、`pnpm test` で形式の読み込みを検証します。

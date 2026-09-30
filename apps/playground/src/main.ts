@@ -1,6 +1,6 @@
 import './style.css'
 import {
-  loadPotreeV2, loadPotreeV2FromFiles, PotreeV2Clipping, selectPotreeV2Files,
+  loadPotreeV2, loadPotreeV2FromFiles, PotreeV2Clipping, PotreeV2EDL, selectPotreeV2Files,
   type PotreeV2ClipBoxMode, type PotreeV2PickResult, type PotreeV2PointCloud, type PotreeV2PointShape,
   type PotreeV2PointSizeType,
 } from '@geemil/potree-v2-three'
@@ -28,6 +28,9 @@ const settings = {
   url: new URLSearchParams(location.search).get('url') ?? '/pump/metadata.json',
   pointSize: 2,
   pointShape: 'square' as PotreeV2PointShape,
+  edl: false,
+  edlStrength: 0.4,
+  edlRadius: 1.4,
   pointSizeType: 'fixed' as PotreeV2PointSizeType,
   minPointSize: 2,
   maxPointSize: 50,
@@ -135,6 +138,9 @@ appearanceFolder.add(settings, 'pointShape', { 四角: 'square', 丸: 'circle' }
   if (cloud) cloud.material.shape = value
   requestRender()
 })
+appearanceFolder.add(settings, 'edl').name('EDL').onChange(requestRender)
+appearanceFolder.add(settings, 'edlStrength', 0, 5, 0.1).name('EDL の強さ').onChange(requestRender)
+appearanceFolder.add(settings, 'edlRadius', 0.5, 4, 0.1).name('EDL の半径 (px)').onChange(requestRender)
 appearanceFolder.add(settings, 'pointBudgetMP', 0.5, 20, 0.5).name('点数予算 (MP)').onChange((value: number) => {
   if (cloud) cloud.pointBudget = value * 1_000_000
 })
@@ -258,6 +264,7 @@ const renderer = new WebGLRenderer({ antialias: false, alpha: true })
 renderer.setPixelRatio(settings.pixelRatio)
 viewport.append(renderer.domElement)
 const profiler = new RenderProfiler(renderer)
+const edl = new PotreeV2EDL()
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.enableDamping = true
 
@@ -537,7 +544,15 @@ function animate() {
   if (renderRequested || settings.continuousRender) {
     const changed = renderRequested
     renderRequested = false
-    profiler.measure(() => renderer.render(scene, camera))
+    profiler.measure(() => {
+      if (settings.edl && cloud) {
+        edl.strength = settings.edlStrength
+        edl.radius = settings.edlRadius
+        edl.render(renderer, scene, camera, [cloud])
+      } else {
+        renderer.render(scene, camera)
+      }
+    })
     updatePickMarker()
     // The point under the pointer may have changed with the view or the loaded nodes.
     if (changed) pickRequested = true
@@ -558,6 +573,7 @@ window.addEventListener('beforeunload', () => {
   edges.dispose()
   controls.dispose()
   profiler.dispose()
+  edl.dispose()
   renderer.dispose()
   gui.destroy()
 })
