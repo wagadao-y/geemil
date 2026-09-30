@@ -542,8 +542,8 @@ export class PotreeV2PointCloud {
       if (cloud.root.numPoints > 0) {
         await gate.retry(async () => {
           // Like update()'s batches, wait for room in the shared decoder backlog first.
-          const release = await cloud.reserveDecoderFetch(signal);
-          const [failure] = await cloud.loadBatch([cloud.root], release);
+          await cloud.waitForDecoderRoom(signal);
+          const [failure] = await cloud.loadBatch([cloud.root]);
           if (failure) throw failure.error;
         }, LOAD_ATTEMPTS, signal);
         PotreeV2PointCloud.installDecodedNodes([cloud], Infinity);
@@ -621,15 +621,14 @@ export class PotreeV2PointCloud {
   }
 
   /**
-   * reserveFetch() in the decoder pool once its backlog has room. The pool is looked up
-   * again on every check: a pool whose Workers fail while this waits is replaced, and
-   * the reservation must count against the pool that will decode.
+   * Wait until the decoder pool's backlog has room. The pool is looked up again on every
+   * check: a pool whose Workers fail while this waits is replaced, and the room must be
+   * in the pool that will decode.
    */
-  private async reserveDecoderFetch(signal?: AbortSignal): Promise<() => void> {
+  private async waitForDecoderRoom(signal?: AbortSignal): Promise<void> {
     for (;;) {
       if (signal?.aborted) throw new DOMException('The operation was aborted', 'AbortError');
-      const decoder = this.liveDecoder();
-      if (!decoder.full) return decoder.reserveFetch();
+      if (!this.liveDecoder().full) return;
       await sleep(BACKLOG_POLL_MS, signal);
     }
   }
@@ -882,8 +881,10 @@ export class PotreeV2PointCloud {
   /**
    * Start the most important batches of all clouds while request slots are free.
    * Network and decoding overlap: a batch frees its request slot once its bytes
-   * arrive, while batches being fetched or waiting for a Worker are bounded by the
-   * pool's backlog.
+   * arrive. Requests are bounded by the request slots and decode jobs by the pool's
+   * backlog, so a small pool does not limit how many ranges are fetched at once.
+   * No batch starts while the backlog is full, so the network does not run ahead of
+   * decoding with priorities that the view may no longer have.
    */
   private static requestBatches(
     work: readonly { cloud: PotreeV2PointCloud; pending: OctreeNode[] }[], limits: UpdateLimits,
@@ -943,8 +944,6 @@ export class PotreeV2PointCloud {
       const request: BatchRequest = { nodes, controller: new AbortController(), wantedAt: performance.now() };
       this.fetchingRequests.add(request);
       signal = request.controller.signal;
-      // Ends as the fetched bytes are submitted, when the pool's queue starts counting them.
-      const releaseDecoder = this.liveDecoder().reserveFetch();
       let fetching = true;
       releaseRequest = () => {
         if (!fetching) return;
@@ -952,7 +951,6 @@ export class PotreeV2PointCloud {
         this.fetchingRequests.delete(request);
         slots.inFlight--;
         this.inFlight--;
-        releaseDecoder();
       };
     }
     const states = nodes.map(node => this.state(node));

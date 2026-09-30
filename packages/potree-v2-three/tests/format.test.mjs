@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { brotliCompressSync } from 'node:zlib';
 import { createRoot, parseHierarchyChunk, validateMetadata } from '../dist/format.js';
-import { decodeNode } from '../dist/decode.js';
+import { decodeBatchNode, decodeNode } from '../dist/decode.js';
 import { fetchRange, HttpError, parseRetryAfter } from '../dist/http.js';
 import { RequestGate } from '../dist/request-gate.js';
 import { EncodedNodeCache } from '../dist/encoded-cache.js';
@@ -1197,7 +1197,7 @@ test('a batch frees its request slot while it waits for decoding', async () => {
   }
 });
 
-test('batches being fetched count against the decode backlog', async () => {
+test('octree requests use every free slot and wait only while decode jobs fill the backlog', async () => {
   // A root and 8 children 70,000 bytes apart, so each child is a batch of its own.
   const offsets = Array.from({ length: 8 }, (_, i) => 18 + i * 70_000);
   const metadata = { ...base, points: 9, hierarchy: { firstChunkSize: 22 * 9 } };
@@ -1213,24 +1213,48 @@ test('batches being fetched count against the decode backlog', async () => {
     if (!child) return files206(url, init);
     return new Promise(resolve => held.push(() => resolve(files206(url, init))));
   };
-  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, maxConcurrentLoads: 6, decoderWorkers: 1,
-  });
+  // Workers that decode only when the test answers, so decode jobs stay in the backlog.
+  const originalWorker = globalThis.Worker;
+  const posted = [];
+  globalThis.Worker = class {
+    postMessage(message) { if (message.id !== undefined) posted.push({ worker: this, message }); }
+    terminate() {}
+  };
+  const respond = async () => {
+    await waitFor(() => posted.length > 0);
+    const { worker, message } = posted.shift();
+    const nodes = [];
+    for (const node of message.nodes) nodes.push(await decodeBatchNode(message.bytes, message.start, node, message.metadata));
+    worker.onmessage({ data: { id: message.id, nodes } });
+  };
+  let cloud;
   try {
+    const loading = loadPotreeV2('https://example.test/cloud/metadata.json', {
+      fetch: fetcher, maxConcurrentLoads: 6, decoderWorkers: 1,
+    });
+    await respond(); // The root.
+    cloud = await loading;
     const children = cloud.root.children.filter(Boolean);
-    cloud.constructor.requestBatches([{ cloud, pending: children }], cloud.ownLimits());
-    // One Worker allows a backlog of 2, although 6 request slots are free.
-    assert.equal(held.length, 2);
-    assert.equal(cloud.decoder.backlog, 2);
-    held.splice(0).forEach(release => release());
-    await waitFor(() => cloud.decodedQueue.length === 2);
+    const request = () => cloud.constructor.requestBatches([{ cloud, pending: children }], cloud.ownLimits());
+    request();
+    // One Worker, yet all 6 request slots are used: batches being fetched are not decode jobs.
+    assert.equal(held.length, 6);
     assert.equal(cloud.decoder.backlog, 0);
-    cloud.constructor.requestBatches([{ cloud, pending: children }], cloud.ownLimits());
+    held.splice(0).forEach(release => release());
+    await waitFor(() => cloud.decoder.backlog === 6);
+    // The arrived batches fill the backlog of one Worker, so the other children wait.
+    request();
+    assert.equal(held.length, 0);
+    for (let i = 0; i < 5; i++) await respond();
+    assert.equal(cloud.decoder.backlog, 1);
+    request();
     assert.equal(held.length, 2);
     held.splice(0).forEach(release => release());
-    await waitFor(() => cloud.decodedQueue.length === 4);
+    for (let i = 0; i < 3; i++) await respond();
+    await waitFor(() => cloud.decodedQueue.length === 8);
   } finally {
-    cloud.dispose();
+    cloud?.dispose();
+    globalThis.Worker = originalWorker;
   }
 });
 

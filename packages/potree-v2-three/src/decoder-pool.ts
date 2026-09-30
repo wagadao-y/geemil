@@ -34,8 +34,6 @@ export class DecoderPool {
   private disposed = false;
   private workerFailure?: Error;
   private references = 0;
-  /** Batches being fetched to be decoded here; counted so that fetched bytes waiting for a Worker stay bounded. */
-  private fetching = 0;
 
   /**
    * The pool shared by every point cloud, created on first use and disposed with the
@@ -54,28 +52,18 @@ export class DecoderPool {
   /** Its Workers failed, so every decode rejects; acquire() returns a new pool. */
   get failed(): boolean { return this.workerFailure !== undefined; }
 
-  /** Jobs waiting for or running on a Worker, and batches reserved by reserveFetch() still being fetched. */
+  /** Jobs waiting for or running on a Worker. */
   get backlog(): number {
-    return this.fetching + this.queue.length + this.workers.reduce((n, slot) => n + (slot.job ? 1 : 0), 0);
+    return this.queue.length + this.workers.reduce((n, slot) => n + (slot.job ? 1 : 0), 0);
   }
-
-  /** New batches wait while the backlog holds twice as many jobs as there are Workers. */
-  get full(): boolean { return this.backlog >= this.maxWorkers * 2; }
 
   /**
-   * Count a batch being fetched in the backlog, so that batches finishing together
-   * cannot queue beyond it. The returned function ends the reservation; call it once
-   * the bytes have arrived, right before they are submitted, or when the fetch fails.
+   * New batches wait while the backlog holds twice as many jobs as there are Workers.
+   * Batches already being fetched are not counted: the request limit bounds them, and
+   * counting them would cap network concurrency at the Worker count. They join the
+   * backlog as they arrive, so it holds at most twice the Workers plus the requests in flight.
    */
-  reserveFetch(): () => void {
-    this.fetching++;
-    let reserved = true;
-    return () => {
-      if (!reserved) return;
-      reserved = false;
-      this.fetching--;
-    };
-  }
+  get full(): boolean { return this.backlog >= this.maxWorkers * 2; }
 
   /** Give back a pool from acquire(); the last release disposes it. */
   release(): void {
