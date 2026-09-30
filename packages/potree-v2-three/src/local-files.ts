@@ -22,10 +22,10 @@ export function selectPotreeV2Files(files: FileList | Iterable<File>): Record<Re
   }
   const datasets = [...directories.values()].filter(entries => requiredNames.every(name => entries.has(name)));
   if (datasets.length === 0) {
-    throw new Error('metadata.json、hierarchy.bin、octree.bin の3ファイルをまとめて選択してください。');
+    throw new Error('Select metadata.json, hierarchy.bin and octree.bin of one Potree v2 dataset together');
   }
   if (datasets.length > 1) {
-    throw new Error('複数の Potree v2 データが見つかりました。1つのデータセットの3ファイルを選択してください。');
+    throw new Error('The selected files contain several Potree v2 datasets; select the three files of one dataset');
   }
   const entries = datasets[0]!;
   return {

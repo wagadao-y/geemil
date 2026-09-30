@@ -607,14 +607,14 @@ test('loads a selected local folder using slices of the binary files', async () 
 });
 
 test('requires exactly one complete local dataset', () => {
-  assert.throws(() => selectPotreeV2Files([new File(['{}'], 'metadata.json')]), /3ファイル/);
+  assert.throws(() => selectPotreeV2Files([new File(['{}'], 'metadata.json')]), /Select metadata\.json, hierarchy\.bin and octree\.bin/);
   const names = ['metadata.json', 'hierarchy.bin', 'octree.bin'];
   const files = ['first', 'second'].flatMap(dir => names.map(name => {
     const file = new File([''], name);
     Object.defineProperty(file, 'webkitRelativePath', { value: `${dir}/${name}` });
     return file;
   }));
-  assert.throws(() => selectPotreeV2Files(files), /複数/);
+  assert.throws(() => selectPotreeV2Files(files), /several Potree v2 datasets/);
 });
 
 function flakyCloudFetcher(files, failures, status = 500, headers = {}) {
