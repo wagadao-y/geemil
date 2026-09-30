@@ -484,7 +484,8 @@ function updateTiming() {
   if (changed) for (const controller of timingControllers) controller.updateDisplay()
 }
 
-async function openCloud(loader: () => Promise<PotreeV2PointCloud>, source: string, url?: string) {
+/** `keepCamera` keeps the view, for reloads of the same data. */
+async function openCloud(loader: () => Promise<PotreeV2PointCloud>, source: string, url?: string, keepCamera = false) {
   const current = ++requestId
   currentLoader = loader
   currentSource = source
@@ -508,7 +509,7 @@ async function openCloud(loader: () => Promise<PotreeV2PointCloud>, source: stri
     next.material.intensityGamma = settings.intensityGamma
     applyColorType(next)
     scene.add(next.group)
-    fitCloud(next)
+    if (!keepCamera) fitCloud(next)
     applyClipping()
     requestRender()
     updateInfo(next, source)
@@ -526,7 +527,8 @@ let decodedAttributes: string[] | undefined
 function decodeAndReload(target: PotreeV2PointCloud, name: string): boolean {
   if (target.material.attributes.includes(name) || !target.metadata.attributes.some(a => a.name === name)) return false
   decodedAttributes = [...target.material.attributes, name]
-  actions.reload()
+  // Only the decoded attributes change, so the view stays where it is.
+  if (currentLoader) void openCloud(currentLoader, currentSource, currentUrl, true)
   return true
 }
 
