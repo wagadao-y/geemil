@@ -386,6 +386,8 @@ export class PotreeV2PointCloud {
   private lastCachePointBudget = NaN;
   private lastMinNodePixelSize = NaN;
   private lastShowBoundingBoxes = false;
+  /** `group` and all its ancestors were visible at the last update. */
+  private shown = true;
   private lastClipping: PotreeV2Clipping | null = null;
   /** Clip state of the last traversal, compared to decide whether to traverse again. */
   private lastClipKey: number[] = [];
@@ -926,6 +928,7 @@ export class PotreeV2PointCloud {
    * Recompute visible nodes and start background loads. Call once per render frame.
    * Returns true when the scene changed and should be rendered again. When the view,
    * viewport and settings are unchanged and all loads have settled, the traversal is skipped.
+   * While `group` or an ancestor is hidden, nothing is selected or loaded.
    * A cloud added to a PotreeV2PointCloudSet is updated through the set instead.
    */
   update(camera: Camera, viewportHeight: number): boolean {
@@ -1010,7 +1013,8 @@ export class PotreeV2PointCloud {
     clipKey.length = 0;
     if (this.clipping) appendClippingKey(this.clipping, this.group.matrixWorld, clipKey);
     this.clipChanged = this.clipping !== this.lastClipping || !sameKey(clipKey, this.lastClipKey);
-    const unchanged = this.settled && projection.equals(this.lastView) && viewportHeight === this.lastViewportHeight &&
+    const shown = isShown(this.group);
+    const unchanged = this.settled && shown === this.shown && projection.equals(this.lastView) && viewportHeight === this.lastViewportHeight &&
       pointBudget === this.lastPointBudget && cachePointBudget === this.lastCachePointBudget &&
       this.minNodePixelSize === this.lastMinNodePixelSize && this.showBoundingBoxes === this.lastShowBoundingBoxes &&
       !this.clipChanged;
@@ -1023,6 +1027,7 @@ export class PotreeV2PointCloud {
     this.lastCachePointBudget = cachePointBudget;
     this.lastMinNodePixelSize = this.minNodePixelSize;
     this.lastShowBoundingBoxes = this.showBoundingBoxes;
+    this.shown = shown;
     return unchanged;
   }
 
@@ -1037,7 +1042,9 @@ export class PotreeV2PointCloud {
     };
     this.nodeClips = new Map();
     // Nodes outside the view or clipped away are never queued, so the heap only holds visible candidates.
-    if (!this.frustum.intersectsBox(this.root.box)) return traversal;
+    // A hidden cloud selects nothing, as in Potree: it spends no budget, and its nodes
+    // become the least recently displayed ones to evict.
+    if (!this.shown || !this.frustum.intersectsBox(this.root.box)) return traversal;
     const rootClip = clip ? clipNode(clip.root, this.root.box, clip.keepPrune) : NO_CLIP;
     if (rootClip) candidates.push({ node: this.root, pixels: Infinity, traversal, clip: rootClip });
     return traversal;
@@ -1242,11 +1249,12 @@ export class PotreeV2PointCloud {
    * Find the point drawn at `x`, `y` (CSS pixels from the canvas' top-left corner)
    * among the nodes displayed by the last `update()`. The IDs are rendered on the GPU
    * and read back asynchronously; attribute values come from the decoded arrays.
+   * Returns null while `group` or an ancestor is hidden.
    */
   async pick(
     renderer: WebGLRenderer, camera: Camera, x: number, y: number, options: PotreeV2PickOptions = {},
   ): Promise<PotreeV2PickResult | null> {
-    if (this.disposed) return null;
+    if (this.disposed || !isShown(this.group)) return null;
     const targets: PickTarget[] = [];
     for (const node of this.displayed) {
       const points = this.installed.get(node)?.points;
@@ -1313,6 +1321,14 @@ export class PotreeV2PointCloud {
     this.boxGeometry.dispose();
     this.boxMaterial.dispose();
   }
+}
+
+/** False when `object` or any of its ancestors is hidden, so that Three.js does not draw it. */
+function isShown(object: Object3D): boolean {
+  for (let current: Object3D | null = object; current; current = current.parent) {
+    if (!current.visible) return false;
+  }
+  return true;
 }
 
 function projectedRadius(

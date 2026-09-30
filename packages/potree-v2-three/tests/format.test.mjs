@@ -7,7 +7,7 @@ import { fetchRange, HttpError, parseRetryAfter } from '../dist/http.js';
 import { RequestGate } from '../dist/request-gate.js';
 import { EncodedNodeCache } from '../dist/encoded-cache.js';
 import { loadPotreeV2, loadPotreeV2FromFiles, PotreeV2PointCloudSet, selectPotreeV2Files } from '../dist/index.js';
-import { Box3, PerspectiveCamera, Vector3 } from 'three';
+import { Box3, Group, PerspectiveCamera, Vector3 } from 'three';
 
 async function waitFor(predicate) {
   for (let i = 0; i < 100; i++) {
@@ -1184,6 +1184,35 @@ test('a cloud set shares one point budget, preferring the larger projected nodes
     assert.equal(far.group.children.length, 1);
     set.pointBudget = 4;
     await waitFor(() => { set.update(camera, 600); return far.group.children.length === 2; });
+  } finally {
+    near.dispose();
+    far.dispose();
+  }
+});
+
+test('a hidden cloud selects nothing, leaving the shared budget to visible clouds', async () => {
+  const [near, far] = await loadChildClouds(2);
+  const set = new PotreeV2PointCloudSet({ pointBudget: 2 });
+  const parent = new Group();
+  parent.add(far.group);
+  set.add(near);
+  set.add(far);
+  try {
+    const camera = childViewCamera();
+    set.update(camera, 600);
+    // Both roots take the budget of 2 points.
+    assert.equal(near.loadDiagnostics.requiredNodes, 1);
+    assert.equal(far.loadDiagnostics.requiredNodes, 1);
+    parent.visible = false; // An ancestor hides far, as group.visible = false would.
+    await waitFor(() => { set.update(camera, 600); return near.group.children.length === 2; });
+    assert.equal(far.loadDiagnostics.requiredNodes, 0);
+    assert.equal(far.group.children[0].visible, false);
+    assert.equal(await far.pick({}, camera, 300, 300), null);
+    // The view is unchanged, yet showing the cloud again selects its root again.
+    parent.visible = true;
+    set.update(camera, 600);
+    assert.equal(far.loadDiagnostics.requiredNodes, 1);
+    assert.equal(far.group.children[0].visible, true);
   } finally {
     near.dispose();
     far.dispose();
