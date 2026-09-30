@@ -19,6 +19,8 @@ import { PointPicker } from './picking.js';
 import type { PickHit, PickTarget } from './picking.js';
 import { PotreeV2PointMaterial } from './material.js';
 import type { PotreeV2PointShape } from './material.js';
+import { densityLevelOffset, VisibleNodesTexture } from './point-size.js';
+import type { PotreeV2PointSizeType } from './point-size.js';
 import {
   appendClippingKey, clipBoxCount, clipNode, grownCapacity, NO_CLIP, sameKey, snapshotClipping,
 } from './clipping.js';
@@ -49,6 +51,12 @@ export interface PotreeV2Options {
   pointSize?: number;
   /** Point sprite shape; also the area a pick hits. Default: `'square'`, as in Potree. */
   pointShape?: PotreeV2PointShape;
+  /** How `pointSize` becomes pixels. Default: `'fixed'`. */
+  pointSizeType?: PotreeV2PointSizeType;
+  /** Lower point size limit in CSS pixels for `attenuated` and `adaptive`. Default: 2, as in Potree. */
+  minPointSize?: number;
+  /** Upper point size limit in CSS pixels for `attenuated` and `adaptive`. Default: 50, as in Potree. */
+  maxPointSize?: number;
   /** Show boxes around currently displayed nodes. Default: false. */
   showBoundingBoxes?: boolean;
   /** Clip boxes and planes; one PotreeV2Clipping can be shared by several clouds. Default: null. */
@@ -190,6 +198,11 @@ type Traversal = {
   /** Enabled clips at this update; undefined when nothing is clipped. */
   clip?: ClipSnapshot;
   selected: Set<OctreeNode>;
+  /**
+   * Selected nodes without points. The converter may move every point of a sparse node
+   * to its ancestors; as in Potree, adaptive sizes still count the node as displayed.
+   */
+  empty: OctreeNode[];
   pending: OctreeNode[];
   hierarchyPending: number;
   sceneReady: boolean;
@@ -301,6 +314,12 @@ export class PotreeV2PointCloud {
   /** Nodes installed in the scene, least recently displayed first. */
   private readonly installed = new Map<OctreeNode, NodeState>();
   private displayed = new Set<OctreeNode>();
+  /** Displayed nodes for adaptive point sizes. */
+  private readonly visibleNodes = new VisibleNodesTexture();
+  /** Nodes in visibleNodes: the displayed ones and the selected empty ones. */
+  private lodNodes = new Set<OctreeNode>();
+  /** Density level offsets of installed nodes, for adaptive point sizes. */
+  private readonly levelOffsets = new Map<OctreeNode, number>();
   /** Decoded nodes waiting for installation; `rank` is scratch space for installDecodedNodes. */
   private readonly decodedQueue: { node: OctreeNode; attributes: DecodedNodeData; rank: number }[] = [];
   private readonly controller = new AbortController();
@@ -387,7 +406,10 @@ export class PotreeV2PointCloud {
     });
     this.onError = options.onError;
     this.material = new PotreeV2PointMaterial({
-      size: options.pointSize ?? 2, shape: options.pointShape ?? 'square', vertexColors: this.decodedAttributes.includes('rgb'),
+      size: options.pointSize ?? 2, shape: options.pointShape ?? 'square',
+      sizeType: options.pointSizeType ?? 'fixed',
+      minSize: options.minPointSize ?? 2, maxSize: options.maxPointSize ?? 50,
+      spacing: metadata.spacing, visibleNodes: this.visibleNodes, vertexColors: this.decodedAttributes.includes('rgb'),
     });
     this.group.name = metadata.name ?? 'Potree v2 point cloud';
   }
@@ -663,6 +685,7 @@ export class PotreeV2PointCloud {
 
   private installNode({ node, attributes }: { node: OctreeNode; attributes: DecodedNodeData }): void {
     const geometry = createNodeGeometry(attributes, node.box);
+    this.levelOffsets.set(node, densityLevelOffset(attributes.position!.array, node.box, node.level, this.metadata.spacing));
     const points = new Points(geometry, this.material);
     points.name = node.name;
     // Positions are relative to the node's minimum; the large offset stays in double-precision matrices.
@@ -672,7 +695,7 @@ export class PotreeV2PointCloud {
     points.visible = false;
     points.frustumCulled = false;
     // Every node draws with the shared material, so its clips are uploaded right before its draw.
-    points.onBeforeRender = () => this.material.setNodeClip(this.nodeClips.get(node) ?? NO_CLIP, node.box.min);
+    points.onBeforeRender = () => this.material.setNode(node, this.nodeClips.get(node) ?? NO_CLIP, node.box.min);
     this.group.add(points);
     const state = this.state(node);
     state.queued = false;
@@ -853,6 +876,8 @@ export class PotreeV2PointCloud {
         cloud.selectionRank.set(node, selectedCount++);
         traversal.selected.add(node);
         if (candidate.clip !== NO_CLIP) cloud.nodeClips.set(node, candidate.clip);
+      } else if (node.type !== 2 || node.hierarchyLoaded) {
+        traversal.empty.push(node);
       }
       if (node.type === 2 && !node.hierarchyLoaded) {
         traversal.hierarchyPending++;
@@ -910,7 +935,7 @@ export class PotreeV2PointCloud {
     this.selectionRank.clear();
     const clip = this.clipping ? snapshotClipping(this.clipping, this.group.matrixWorld) : undefined;
     const traversal: Traversal = {
-      cloud: this, clip, selected: new Set(), pending: [], hierarchyPending: 0, sceneReady: false,
+      cloud: this, clip, selected: new Set(), empty: [], pending: [], hierarchyPending: 0, sceneReady: false,
     };
     this.nodeClips = new Map();
     // Nodes outside the view or clipped away are never queued, so the heap only holds visible candidates.
@@ -947,7 +972,7 @@ export class PotreeV2PointCloud {
 
   /** Show one cloud's selection; returns true when its scene changed. */
   private finishTraversal(traversal: Traversal, stamp: number): boolean {
-    const changed = this.updateDisplayedNodes(traversal.selected, stamp);
+    const changed = this.updateDisplayedNodes(traversal.selected, traversal.empty, stamp);
     traversal.sceneReady = this.updateLoadDiagnostics(traversal.selected, traversal.hierarchyPending);
     return changed;
   }
@@ -970,7 +995,7 @@ export class PotreeV2PointCloud {
    * Show selected installed nodes and hide the ones displayed last frame, without
    * visiting every cached node. Displayed nodes move to the most recent end of the LRU.
    */
-  private updateDisplayedNodes(selected: Set<OctreeNode>, stamp: number): boolean {
+  private updateDisplayedNodes(selected: Set<OctreeNode>, empty: readonly OctreeNode[], stamp: number): boolean {
     let changed = false;
     const show = (object: Object3D | undefined, visible: boolean) => {
       if (!object || object.visible === visible) return;
@@ -998,6 +1023,13 @@ export class PotreeV2PointCloud {
       this.installed.delete(node);
       this.installed.set(node, state);
       displayed.add(node);
+    }
+    const lodNodes = new Set([...displayed, ...empty]);
+    if (lodNodes.size !== this.lodNodes.size || [...lodNodes].some(node => !this.lodNodes.has(node))) {
+      // Empty nodes have no density to measure, so their offset is 0, as in Potree.
+      this.visibleNodes.update(lodNodes, node => this.levelOffsets.get(node) ?? 0);
+      this.lodNodes = lodNodes;
+      changed = true;
     }
     this.displayed = displayed;
     return changed;
@@ -1103,6 +1135,7 @@ export class PotreeV2PointCloud {
       state.boxHelper = undefined;
     }
     this.installed.delete(node);
+    this.levelOffsets.delete(node);
     this.cachedPoints -= node.numPoints;
     this.releaseState(node, state);
   }
@@ -1124,8 +1157,7 @@ export class PotreeV2PointCloud {
     this.group.updateWorldMatrix(true, false);
     this.picker ??= new PointPicker();
     const hit = await this.picker.pick(
-      renderer, camera, targets, this.group.matrixWorld, x, y, this.material.size, options.radius ?? 0,
-      this.material.clipCapacity, this.material.shape,
+      renderer, camera, targets, this.group.matrixWorld, x, y, options.radius ?? 0, this.material,
     );
     if (!hit || this.disposed) return null;
     return this.pickResult(hit, renderer.getPixelRatio());
@@ -1172,10 +1204,13 @@ export class PotreeV2PointCloud {
     }
     this.installed.clear();
     this.displayed.clear();
+    this.lodNodes.clear();
     this.states.clear();
     this.decodedQueue.length = 0;
     this.encodedCache.clear();
     this.material.dispose();
+    this.visibleNodes.dispose();
+    this.levelOffsets.clear();
     this.picker?.dispose();
     this.boxGeometry.dispose();
     this.boxMaterial.dispose();

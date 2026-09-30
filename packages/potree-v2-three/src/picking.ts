@@ -5,9 +5,11 @@ import {
 import type { Camera, OrthographicCamera, PerspectiveCamera, WebGLRenderer } from 'three';
 import type { OctreeNode } from './format.js';
 import { ClipUniforms, clipVertex, clipVertexPars } from './clipping.js';
-import type { ClipCapacity, NodeClip } from './clipping.js';
+import type { NodeClip } from './clipping.js';
 import { pointShapeDefines, pointShapeFragment } from './material.js';
-import type { PotreeV2PointShape } from './material.js';
+import type { PotreeV2PointMaterial, PotreeV2PointShape } from './material.js';
+import { PointSizeUniforms, pointSizeDefines, pointSizeVertexPars } from './point-size.js';
+import type { PotreeV2PointSizeType } from './point-size.js';
 
 /** A displayed node that can be hit by a pick. */
 export interface PickTarget {
@@ -26,7 +28,7 @@ export interface PickHit {
 }
 
 const vertexShader = /* glsl */`
-uniform float size;
+${pointSizeVertexPars}
 ${clipVertexPars}
 flat out highp uint vIndex;
 void main() {
@@ -34,8 +36,8 @@ void main() {
   // vertex ID is the index into the node's attribute arrays.
   vIndex = uint(gl_VertexID);
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  gl_PointSize = pointSize();
   ${clipVertex}
-  gl_PointSize = size;
 }`;
 
 const fragmentShader = /* glsl */`
@@ -70,13 +72,17 @@ async function waitForSync(gl: WebGL2RenderingContext, sync: WebGLSync): Promise
  */
 export class PointPicker {
   private readonly clip = new ClipUniforms();
+  private readonly pointSize = new PointSizeUniforms();
   private readonly material = new ShaderMaterial({
     glslVersion: GLSL3,
     vertexShader, fragmentShader,
-    uniforms: { size: { value: 1 }, nodeId: { value: 0 }, ...this.clip.uniforms },
-    defines: { ...this.clip.defines, ...pointShapeDefines('square') },
+    uniforms: { nodeId: { value: 0 }, ...this.pointSize.uniforms, ...this.clip.uniforms },
+    defines: { ...this.clip.defines, ...pointShapeDefines('square'), ...pointSizeDefines('fixed') },
   });
   private shape: PotreeV2PointShape = 'square';
+  private sizeType: PotreeV2PointSizeType = 'fixed';
+  /** The display material of the current pick, for the per-node visible-node indices. */
+  private display?: PotreeV2PointMaterial;
   // RGBA_INTEGER/UNSIGNED_INT is the read format WebGL2 guarantees for unsigned
   // integer attachments, so the readback does not depend on implementation formats.
   private readonly renderTarget = new WebGLRenderTarget(1, 1, {
@@ -99,24 +105,29 @@ export class PointPicker {
   }
 
   /**
-   * `x`, `y` are CSS pixels from the canvas' top-left corner, and `pointSize` and
-   * `radius` are CSS pixels too. With radius 0 only a point drawn under that pixel hits.
-   * `clipCapacity` and `shape` are the display material's, so both compile the same
-   * clip test and cover the same pixels.
+   * `x`, `y` are CSS pixels from the canvas' top-left corner, and `radius` is CSS pixels too.
+   * With radius 0 only a point drawn under that pixel hits. Clips, point size and shape
+   * follow `display`, so both materials compile the same tests and cover the same pixels.
    */
   async pick(
     renderer: WebGLRenderer, camera: Camera, targets: PickTarget[], groupMatrix: Matrix4,
-    x: number, y: number, pointSize: number, radius: number, clipCapacity: ClipCapacity,
-    shape: PotreeV2PointShape,
+    x: number, y: number, radius: number, display: PotreeV2PointMaterial,
   ): Promise<PickHit | null> {
     if (targets.length === 0 || !isPickCamera(camera)) return null;
-    if (this.clip.resize(clipCapacity)) {
+    const { shape, sizeType } = display;
+    const sizeSettings = display.sizeSettings;
+    if (this.clip.resize(display.clipCapacity)) {
       this.material.defines = { ...this.material.defines, ...this.clip.defines };
       this.material.needsUpdate = true;
     }
     if (shape !== this.shape) {
       this.shape = shape;
       this.material.defines = { ...this.material.defines, ...pointShapeDefines(shape) };
+      this.material.needsUpdate = true;
+    }
+    if (sizeType !== this.sizeType) {
+      this.sizeType = sizeType;
+      this.material.defines = { ...this.material.defines, ...pointSizeDefines(sizeType) };
       this.material.needsUpdate = true;
     }
     const gl = renderer.getContext();
@@ -126,7 +137,8 @@ export class PointPicker {
     const cx = x * pixelRatio;
     const cy = y * pixelRatio;
     const r = Math.max(0, radius) * pixelRatio;
-    const size = pointSize * pixelRatio;
+    // Largest point drawn, in device pixels.
+    const size = (sizeType === 'fixed' ? sizeSettings.size : sizeSettings.maxSize) * pixelRatio;
 
     // Pixels searched for hits, in device pixels from the top-left corner.
     const innerX0 = Math.max(0, Math.floor(cx - r));
@@ -166,7 +178,9 @@ export class PointPicker {
       drawn.push(target);
     }
     if (drawn.length === 0) return null;
-    this.material.uniforms.size!.value = size;
+    // The pick target covers the view offset region, so its height is the viewport's.
+    this.pointSize.write(sizeSettings, pixelRatio, height, display.spacing, display.visibleNodes.texture);
+    this.display = display;
 
     const pixels = new Uint32Array(width * height * 4);
     const previousTarget = renderer.getRenderTarget();
@@ -196,6 +210,7 @@ export class PointPicker {
       renderer.setRenderTarget(previousTarget);
       this.scene.clear();
       this.proxyTargets.length = 0;
+      this.display = undefined;
     }
 
     try {
@@ -240,6 +255,7 @@ export class PointPicker {
       proxy.onBeforeRender = () => {
         const target = this.proxyTargets[index]!;
         this.clip.write(target.clip, target.node.box.min);
+        this.pointSize.writeNode(target.node, this.display!.visibleNodes.index(target.node));
         this.material.uniforms.nodeId!.value = id;
         this.material.uniformsNeedUpdate = true;
       };

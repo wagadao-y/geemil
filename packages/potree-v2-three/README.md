@@ -171,6 +171,18 @@ clipping.remove(cut);
 
 `cloud.material` は `ShaderMaterial` を継承した `PotreeV2PointMaterial` です。`material.size`（CSS px）で点のサイズを変えられます。`material.shape` は点の形で、`'square'`（既定）と `'circle'` があり、オプションの `pointShape` でも指定できます。`'circle'` では四隅を描かないので、ピックもその部分には当たりません。形を変えるとシェーダーをコンパイルし直しますが、読み込み済みのノードはそのまま使えます。
 
+`material.sizeType`（オプションは `pointSizeType`）で、`size` から画面上の大きさを決める方法を選べます。
+
+| `sizeType` | `size` の意味 | 画面上の大きさ |
+|---|---|---|
+| `'fixed'`（既定） | CSS px | 常に `size` px |
+| `'attenuated'` | ルートの spacing に掛ける倍率 | ワールド空間で一定の大きさ。近いほど大きい |
+| `'adaptive'` | その位置で表示中の最も深いノードの spacing × 1.7 に掛ける倍率 | 細かいノードが表示されている所ほど小さく、粗い所ほど大きい |
+
+`'attenuated'` と `'adaptive'` では、大きさを `material.minSize`〜`material.maxSize`（CSS px、既定は Potree と同じ 2〜50、オプションは `minPointSize`・`maxPointSize`）に収めます。`size` は 1 前後が目安です。
+
+`'adaptive'` は Potree と同じく、表示中のノードの木を整数テクスチャに書き込み、頂点シェーダーが点の位置から子ノードをたどって最も深い表示ノードのレベルを求めます。加算型の LOD でも、親ノードの点は子ノードが表示されている領域では子ノードの点と同じ大きさになり、粗い点が細かい点を覆いません。オクツリーは点が少なくなった所で分割を止めるので、スキャンデータでは浅いレベルの葉ノードも周囲の深いノードと同じくらい密なことがよくあります。レベルだけで大きさを決めるとそうした葉ノードの点が数倍大きくなるため、Potree の lodOffset と同じく、ノードを読み込んだときに 32³ の格子で 1 セルあたりの点数を数えて実際の点間隔を推定し、レベルを補正します。補正量は PotreeConverter 2 のデータで Potree と一致するので、同じ `size` なら Potree と同じ大きさになります。テクスチャは表示ノードが変わった `update()` でだけ作り直します。ピックも同じ計算で描画するので、見た目どおりの範囲に当たります。
+
 ## 開発
 
 リポジトリのルートで `pnpm install`, `pnpm dev` を実行するとライブラリの watch ビルドと playground が起動します。`pnpm build` で両方をビルド、`pnpm test` で形式の読み込みを検証します。

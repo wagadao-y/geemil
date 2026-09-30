@@ -2,6 +2,7 @@ import './style.css'
 import {
   loadPotreeV2, loadPotreeV2FromFiles, PotreeV2Clipping, selectPotreeV2Files,
   type PotreeV2ClipBoxMode, type PotreeV2PickResult, type PotreeV2PointCloud, type PotreeV2PointShape,
+  type PotreeV2PointSizeType,
 } from '@geemil/potree-v2-three'
 import GUI from 'lil-gui'
 import {
@@ -27,6 +28,9 @@ const settings = {
   url: new URLSearchParams(location.search).get('url') ?? '/pump/metadata.json',
   pointSize: 2,
   pointShape: 'square' as PotreeV2PointShape,
+  pointSizeType: 'fixed' as PotreeV2PointSizeType,
+  minPointSize: 2,
+  maxPointSize: 50,
   pointBudgetMP: 2,
   minNodePixelSize: 30,
   maxNodesToGPUPerFrame: 8,
@@ -107,8 +111,24 @@ sourceFolder.add(actions, 'loadUrl').name('URL を読み込む')
 sourceFolder.add(actions, 'chooseFiles').name('3ファイルを選択')
 sourceFolder.add(actions, 'reload').name('同じデータを再読み込み')
 const appearanceFolder = gui.addFolder('表示')
-appearanceFolder.add(settings, 'pointSize', 1, 8, 0.5).name('点のサイズ (px)').onChange((value: number) => {
+// `size` is pixels for fixed and a spacing factor otherwise, so each type keeps its own value.
+const pointSizes: Record<PotreeV2PointSizeType, number> = { fixed: settings.pointSize, attenuated: 1, adaptive: 1 }
+appearanceFolder.add(settings, 'pointSizeType', { 固定: 'fixed', 距離で減衰: 'attenuated', 適応: 'adaptive' }).name('点サイズの種類').onChange((value: PotreeV2PointSizeType) => {
+  if (cloud) cloud.material.sizeType = value
+  pointSizeController.setValue(pointSizes[value])
+  requestRender()
+})
+const pointSizeController = appearanceFolder.add(settings, 'pointSize', 0.1, 8, 0.1).name('点のサイズ (px / 倍率)').onChange((value: number) => {
+  pointSizes[settings.pointSizeType] = value
   if (cloud) cloud.material.size = value
+  requestRender()
+})
+appearanceFolder.add(settings, 'minPointSize', 0, 20, 0.5).name('最小サイズ (px)').onChange((value: number) => {
+  if (cloud) cloud.material.minSize = value
+  requestRender()
+})
+appearanceFolder.add(settings, 'maxPointSize', 1, 100, 1).name('最大サイズ (px)').onChange((value: number) => {
+  if (cloud) cloud.material.maxSize = value
   requestRender()
 })
 appearanceFolder.add(settings, 'pointShape', { 四角: 'square', 丸: 'circle' }).name('点の形').onChange((value: PotreeV2PointShape) => {
@@ -445,6 +465,9 @@ function loadOptions() {
   return {
     pointSize: settings.pointSize,
     pointShape: settings.pointShape,
+    pointSizeType: settings.pointSizeType,
+    minPointSize: settings.minPointSize,
+    maxPointSize: settings.maxPointSize,
     pointBudget: settings.pointBudgetMP * 1_000_000,
     minNodePixelSize: settings.minNodePixelSize,
     maxNodesToGPUPerFrame: settings.maxNodesToGPUPerFrame,
