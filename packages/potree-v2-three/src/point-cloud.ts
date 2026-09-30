@@ -690,12 +690,10 @@ export class PotreeV2PointCloud {
       }
       // The batch buffer is transferred to the Worker. Keep only selected node
       // ranges, copied before the transfer, so gaps do not consume cache space.
-      if (this.encodedCache.maxBytes > 0) {
-        for (const node of batch.nodes) {
-          const at = Number(node.byteOffset - batch.start);
-          this.encodedCache.put(node, bytes.slice(at, at + Number(node.byteSize)));
-        }
-      }
+      const encoded = this.encodedCache.maxBytes > 0 ? batch.nodes.map(node => {
+        const at = Number(node.byteOffset - batch.start);
+        return bytes.slice(at, at + Number(node.byteSize));
+      }) : [];
       const decoded = await this.liveDecoder().decodeBatch(
         bytes, batch.start,
         batch.nodes.map(node => ({
@@ -704,6 +702,12 @@ export class PotreeV2PointCloud {
         this.metadata, timing => this.noteDecodeTiming(timing, diagnosticsGeneration),
         this.decodedAttributes, this.controller.signal,
       );
+      // Cached only once decoded, so that bytes which fail to decode are fetched again on retry.
+      if (!this.disposed) {
+        for (const [index, node] of batch.nodes.entries()) {
+          if (encoded[index]) this.encodedCache.put(node, encoded[index]);
+        }
+      }
       if (!this.disposed && statsGeneration === this.fetchStatsGeneration) {
         this.fetchStatsState.rangeRequests++;
         this.fetchStatsState.fetchedNodes += batch.nodes.length;

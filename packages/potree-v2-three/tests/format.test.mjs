@@ -443,6 +443,50 @@ test('Brotli nodes are re-decoded from the encoded cache without another range r
   }
 });
 
+test('bytes that fail to decode are not cached, so a retry fetches them again', async () => {
+  const raw = new ArrayBuffer(16);
+  new DataView(raw).setBigUint64(8, morton(2, 4, 6, 16), true);
+  const compressed = new Uint8Array(brotliCompressSync(Buffer.from(raw)));
+  const metadata = {
+    ...base, encoding: 'BROTLI', points: 2,
+    attributes: [base.attributes[0]], hierarchy: { firstChunkSize: 44 },
+  };
+  const hierarchy = concat(
+    record(1, 1, 1, 0, compressed.length),
+    record(0, 0, 1, compressed.length, compressed.length),
+  );
+  const octree = concat(compressed, compressed);
+  let corrupt = 1;
+  const ranges = [];
+  const fetcher = async (url, init = {}) => {
+    const name = new URL(url).pathname.split('/').at(-1);
+    if (name === 'metadata.json') return new Response(JSON.stringify(metadata));
+    const file = name === 'hierarchy.bin' ? hierarchy : octree;
+    const match = /bytes=(\d+)-(\d+)/.exec(init.headers.Range);
+    let body = file.slice(Number(match[1]), Number(match[2]) + 1);
+    if (name === 'octree.bin') {
+      ranges.push(init.headers.Range);
+      if (match[1] !== '0' && corrupt-- > 0) body = new Uint8Array(body.length).fill(0xff);
+    }
+    return new Response(body, {
+      status: 206,
+      headers: { 'Content-Range': `bytes ${match[1]}-${match[2]}/${file.byteLength}` },
+    });
+  };
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher });
+  try {
+    const child = cloud.root.children[0];
+    const [failure] = await cloud.loadBatch([child]);
+    assert.deepEqual(failure.nodes, [child]);
+    assert.equal(cloud.encodedCache.size, 1); // Only the root.
+    assert.deepEqual(await cloud.loadBatch([child]), []);
+    assert.equal(ranges.length, 3); // The retry fetched the child again instead of re-decoding the corrupt bytes.
+    assert.equal(cloud.encodedCache.size, 2);
+  } finally {
+    cloud.dispose();
+  }
+});
+
 test('a failed range fails only its own nodes and keeps the others of the load', async () => {
   const metadata = { ...base, points: 3, hierarchy: { firstChunkSize: 66 } };
   const files = {
