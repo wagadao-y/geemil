@@ -849,7 +849,8 @@ export class PotreeV2PointCloud {
   /**
    * Start the most important batches of all clouds while request slots are free.
    * Network and decoding overlap: a batch frees its request slot once its bytes
-   * arrive, while fetched bytes waiting for a Worker are bounded by the pool's backlog.
+   * arrive, while batches being fetched or waiting for a Worker are bounded by the
+   * pool's backlog.
    */
   private static requestBatches(
     work: readonly { cloud: PotreeV2PointCloud; pending: OctreeNode[] }[], limits: UpdateLimits,
@@ -890,6 +891,8 @@ export class PotreeV2PointCloud {
     this.activeLoads++;
     const request: BatchRequest = { nodes: batch.nodes, controller: new AbortController(), wantedAt: performance.now() };
     this.fetchingRequests.add(request);
+    // Ends as the fetched bytes are submitted, when the pool's queue starts counting them.
+    const releaseDecoder = this.liveDecoder().reserveFetch();
     let fetching = true;
     const releaseRequest = () => {
       if (!fetching) return;
@@ -897,6 +900,7 @@ export class PotreeV2PointCloud {
       this.fetchingRequests.delete(request);
       slots.inFlight--;
       this.inFlight--;
+      releaseDecoder();
     };
     const states = batch.nodes.map(node => this.state(node));
     const fail = (nodes: readonly OctreeNode[], error: unknown) => {

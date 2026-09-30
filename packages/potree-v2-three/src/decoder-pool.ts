@@ -35,6 +35,8 @@ export class DecoderPool {
   private disposed = false;
   private workerFailure?: Error;
   private references = 0;
+  /** Batches being fetched to be decoded here; counted so that fetched bytes waiting for a Worker stay bounded. */
+  private fetching = 0;
 
   /**
    * The pool shared by every point cloud, created on first use and disposed with the
@@ -53,9 +55,24 @@ export class DecoderPool {
   /** Its Workers failed, so every decode rejects; acquire() returns a new pool. */
   get failed(): boolean { return this.workerFailure !== undefined; }
 
-  /** Jobs waiting for or running on a Worker. */
+  /** Jobs waiting for or running on a Worker, and batches reserved by reserveFetch() still being fetched. */
   get backlog(): number {
-    return this.queue.length + this.workers.reduce((n, slot) => n + (slot.job ? 1 : 0), 0);
+    return this.fetching + this.queue.length + this.workers.reduce((n, slot) => n + (slot.job ? 1 : 0), 0);
+  }
+
+  /**
+   * Count a batch being fetched in the backlog, so that batches finishing together
+   * cannot queue beyond it. The returned function ends the reservation; call it once
+   * the bytes have arrived, right before they are submitted, or when the fetch fails.
+   */
+  reserveFetch(): () => void {
+    this.fetching++;
+    let reserved = true;
+    return () => {
+      if (!reserved) return;
+      reserved = false;
+      this.fetching--;
+    };
   }
 
   /** Give back a pool from acquire(); the last release disposes it. */

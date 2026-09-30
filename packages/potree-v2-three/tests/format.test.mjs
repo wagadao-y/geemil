@@ -1124,6 +1124,43 @@ test('a batch frees its request slot while it waits for decoding', async () => {
   }
 });
 
+test('batches being fetched count against the decode backlog', async () => {
+  // A root and 8 children 70,000 bytes apart, so each child is a batch of its own.
+  const offsets = Array.from({ length: 8 }, (_, i) => 18 + i * 70_000);
+  const metadata = { ...base, points: 9, hierarchy: { firstChunkSize: 22 * 9 } };
+  const files = {
+    'metadata.json': JSON.stringify(metadata),
+    'hierarchy.bin': concat(record(1, 0xff, 1, 0, 18), ...offsets.map(offset => record(0, 0, 1, offset, 18))),
+    'octree.bin': new Uint8Array(offsets.at(-1) + 18),
+  };
+  const { fetcher: files206 } = flakyCloudFetcher(files, {});
+  const held = [];
+  const fetcher = (url, init = {}) => {
+    const child = url.pathname?.endsWith('octree.bin') && !init.headers.Range.startsWith('bytes=0-');
+    if (!child) return files206(url, init);
+    return new Promise(resolve => held.push(() => resolve(files206(url, init))));
+  };
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher, maxConcurrentLoads: 6, decoderWorkers: 1,
+  });
+  try {
+    const children = cloud.root.children.filter(Boolean);
+    cloud.constructor.requestBatches([{ cloud, pending: children }], cloud.ownLimits());
+    // One Worker allows a backlog of 2, although 6 request slots are free.
+    assert.equal(held.length, 2);
+    assert.equal(cloud.decoder.backlog, 2);
+    held.splice(0).forEach(release => release());
+    await waitFor(() => cloud.decodedQueue.length === 2);
+    assert.equal(cloud.decoder.backlog, 0);
+    cloud.constructor.requestBatches([{ cloud, pending: children }], cloud.ownLimits());
+    assert.equal(held.length, 2);
+    held.splice(0).forEach(release => release());
+    await waitFor(() => cloud.decodedQueue.length === 4);
+  } finally {
+    cloud.dispose();
+  }
+});
+
 test('update skips unchanged settled views and reports scene changes', async () => {
   const { fetcher } = flakyCloudFetcher(childFiles, {});
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, minNodePixelSize: 1 });
