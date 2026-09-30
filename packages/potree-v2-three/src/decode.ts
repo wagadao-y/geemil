@@ -97,6 +97,18 @@ for (let byte = 0; byte < 6; byte++) {
   }
 }
 
+/**
+ * Bits to drop from the stored rgb values, or undefined to guess per value. PotreeConverter
+ * copies LAS colors unscaled, and many LAS writers store 8-bit values in the 16-bit fields,
+ * so the metadata's maximum tells the two apart for the whole dataset. Without it, values
+ * above 255 are taken as 16-bit, as in Potree, which brightens dark 16-bit colors.
+ */
+function rgbShift(attribute: PotreeV2Attribute): number | undefined {
+  const max = attribute.max;
+  if (!max || max.length !== 3 || !max.every(Number.isFinite)) return undefined;
+  return max.some(value => value > 255) ? 8 : 0;
+}
+
 function storageSize(attribute: PotreeV2Attribute, compressed: boolean): number {
   if (compressed && attribute.name === 'position') return 16;
   if (compressed && attribute.name === 'rgb') return 8;
@@ -260,6 +272,7 @@ function decodeAttributes(
     } else if (attribute.name === 'rgb') {
       // RGBA: 3-byte vertex formats are converted on the CPU by some drivers (ANGLE on D3D11).
       const values = new Uint8Array(pointCount * 4);
+      const shift = rgbShift(attribute);
       if (compressed) {
         for (let i = 0; i < pointCount; i++) {
           const at = attributeOffset + i * size;
@@ -269,9 +282,15 @@ function decodeAttributes(
             r |= mortonX[index]!; g |= mortonY[index]!; b |= mortonZ[index]!;
           }
           const output = i * 4;
-          values[output] = r > 255 ? r >>> 8 : r;
-          values[output + 1] = g > 255 ? g >>> 8 : g;
-          values[output + 2] = b > 255 ? b >>> 8 : b;
+          if (shift === undefined) {
+            values[output] = r > 255 ? r >>> 8 : r;
+            values[output + 1] = g > 255 ? g >>> 8 : g;
+            values[output + 2] = b > 255 ? b >>> 8 : b;
+          } else {
+            values[output] = r >>> shift;
+            values[output + 1] = g >>> shift;
+            values[output + 2] = b >>> shift;
+          }
           values[output + 3] = 255;
         }
       } else {
@@ -281,9 +300,15 @@ function decodeAttributes(
           const r = view.getUint16(at, true);
           const g = view.getUint16(at + 2, true);
           const b = view.getUint16(at + 4, true);
-          values[output] = r > 255 ? r >>> 8 : r;
-          values[output + 1] = g > 255 ? g >>> 8 : g;
-          values[output + 2] = b > 255 ? b >>> 8 : b;
+          if (shift === undefined) {
+            values[output] = r > 255 ? r >>> 8 : r;
+            values[output + 1] = g > 255 ? g >>> 8 : g;
+            values[output + 2] = b > 255 ? b >>> 8 : b;
+          } else {
+            values[output] = r >>> shift;
+            values[output + 1] = g >>> shift;
+            values[output + 2] = b >>> shift;
+          }
           values[output + 3] = 255;
         }
       }

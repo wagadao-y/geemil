@@ -141,6 +141,37 @@ test('decodes Brotli Morton positions and colors', async () => {
   geometry.dispose();
 });
 
+test('the metadata rgb maximum decides 8- or 16-bit colors for the whole dataset', async () => {
+  const withMax = max => ({
+    ...base,
+    attributes: [base.attributes[0], { ...base.attributes[1], min: [0, 0, 0], max }],
+  });
+  const decodeColor = async (metadata, r, g, b) => {
+    const node = createRoot(metadata);
+    node.numPoints = 1;
+    let bytes;
+    if (metadata.encoding === 'BROTLI') {
+      const raw = new ArrayBuffer(24);
+      const view = new DataView(raw);
+      view.setBigUint64(16, morton(r, g, b, 16), true);
+      const compressed = brotliCompressSync(Buffer.from(raw));
+      bytes = compressed.buffer.slice(compressed.byteOffset, compressed.byteOffset + compressed.byteLength);
+    } else {
+      bytes = uncompressedPoint(0, 0, 0, r, g, b).buffer;
+    }
+    const geometry = await decodeNode(bytes, node, metadata);
+    const color = [...geometry.getAttribute('color').array];
+    geometry.dispose();
+    return color;
+  };
+  for (const encoding of ['DEFAULT', 'BROTLI']) {
+    // 16-bit: dark values stay dark instead of being read as 8-bit.
+    assert.deepEqual(await decodeColor({ ...withMax([65280, 255, 300]), encoding }, 200, 255, 65535), [0, 0, 255, 255]);
+    // 8-bit values in the 16-bit fields are kept.
+    assert.deepEqual(await decodeColor({ ...withMax([255, 128, 0]), encoding }, 255, 128, 0), [255, 128, 0, 255]);
+  }
+});
+
 test('decodes all 32 position bits and 16 color bits from Brotli Morton columns', async () => {
   const positions = [
     [0, 0, 0],
