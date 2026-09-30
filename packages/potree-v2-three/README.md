@@ -27,7 +27,7 @@ scene.remove(cloud.group);
 cloud.dispose();
 ```
 
-`cloud.group` は座標を点群の bounding box の最小値で平行移動したローカル座標で表示します。元の座標は `cloud.worldOffset` にあります。大きな地理座標をそのまま `group.position` に設定すると GPU の精度が落ちるため、アプリ側で扱いを決めてください。
+`cloud.group` は座標を点群の bounding box の最小値で平行移動したローカル座標で表示します。元の座標は `cloud.worldOffset` にあります。`cloud.boundingBox` は、このローカル座標での点群の範囲（原点から metadata の bounding box の大きさまで）を返します。大きな地理座標をそのまま `group.position` に設定すると GPU の精度が落ちるため、アプリ側で扱いを決めてください。
 
 `cloud.update()` はカメラと表示領域の高さから必要な階層を選び、近接するノードをまとめて HTTP Range で非同期に読み込みます。戻り値は、ノードの追加・表示切り替え・破棄でシーンが変わったときに `true` になります。カメラ・点群の行列、表示領域の高さ、`pointBudget`、`cachePointBudget`、`minNodePixelSize`、`showBoundingBoxes` が前回と同じで、選ばれたノードがすべてシーンに追加され、読み込み中の処理がない間は、階層の走査を省略して `false` を返します。静止中は、戻り値とカメラ操作を見て描画を省略できます。
 
@@ -59,6 +59,8 @@ HTTP 429（Too Many Requests）と 503（Service Unavailable）は、ノード�
 HTTP のエラーは `HttpError`（`status` と `retryAfterMs` を持ちます）として `onError` に渡されるので、404 などの内容に応じて処理を分けられます。
 
 キャッシュは二段階です。復号済みジオメトリは、表示中の `pointBudget` の2倍の点数まで保持し、超過時に非表示ノードを古い順に破棄します。この上限は `pointBudget` の変更に追従し、`cachePointBudget` で固定値に上書きできます。BROTLI の URL データは、復号前のノードも LRU で最大 128 MiB 保持します。上限は `encodedCacheByteBudget`（バイト数）で変更でき、`0` で無効になります。無圧縮（`DEFAULT`）のデータとローカルファイルは初期状態では復号前のキャッシュを使いません。復号前のキャッシュに残っているノードは再取得せず、Worker で再デコードします。
+
+`cloud.fetchStats` と `cloud.loadDiagnostics` は、playground の統計表示のような計測・デバッグ用の API です。項目はリリースごとに変わることがあり、互換性は保証しません。
 
 `cloud.fetchStats` で成功した octree Range 取得回数 (`rangeRequests`) と取得ノード数 (`fetchedNodes`) を参照できます。復号前キャッシュからの再デコードは含みません。`cloud.clearFetchStats()` で両方を 0 に戻せます。クリア時点で進行中だった取得は、新しいカウントに含めません。
 
@@ -216,12 +218,12 @@ cloud.material.color.set('#ffcc00');
 
 - `elevationRange` の既定値は bounding box の z の範囲です。範囲外の点はグラデーションの端の色になります。z は metadata.json の座標系で、`group` の変換の影響を受けません。
 - `intensityRange` の既定値は metadata にある `intensity` の min/max で、なければ 0〜65535 です。
-- `gradient` の既定値は Potree と同じ `PotreeV2Gradients.SPECTRAL` です。ほかに `VIRIDIS`、`INFERNO`、`RAINBOW`、`GRAYSCALE` があります。位置 0〜1 と色の組を渡せば独自のグラデーションも作れ、色の間は CSS のグラデーションと同じく sRGB で補間します。
+- `gradient` の既定値は Potree と同じ `PotreeV2Gradients.SPECTRAL` です。ほかに `VIRIDIS`、`INFERNO`、`RAINBOW`、`GRAYSCALE` があります（名前の型は `PotreeV2GradientName`）。`PotreeV2Gradients` は凍結されていて書き換えられません。位置 0〜1 と色の組を渡せば独自のグラデーションも作れ、色の間は CSS のグラデーションと同じく sRGB で補間します。
 - RGB と強度の値は Potree と同じく sRGB の値として扱い、グラデーションとクラスの色も sRGB で指定します。
 
 ### 分類
 
-`PotreeV2Classification` はクラス番号（0〜255）ごとの色と表示・非表示を持ちます。初期値は Potree と同じ ASPRS LAS の配色です（地面は茶、植生は緑、建物は橙、ノイズは紫、水面は青など。一覧にない番号は青緑）。点群ごとに 1 つずつ作られますが、オプションの `classification` や `material.classification` に同じものを渡せば複数の点群で共有できます。
+`PotreeV2Classification` はクラス番号（0〜255）ごとの色と表示・非表示を持ちます。初期値は Potree と同じ ASPRS LAS の配色です（地面は茶、植生は緑、建物は橙、ノイズは紫、水面は青など。一覧にない番号は青緑）。配色は `PotreeV2DefaultClassColors`、一覧にない番号の色は `PotreeV2UnlistedClassColor` で参照できます。点群ごとに 1 つずつ作られますが、オプションの `classification` や `material.classification` に同じものを渡せば複数の点群で共有できます。
 
 ```ts
 const classification = new PotreeV2Classification({ 6: { color: '#ff4040' } });

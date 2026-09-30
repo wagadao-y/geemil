@@ -11,20 +11,27 @@ export type PotreeV2PointColorType = 'rgb' | 'solid' | 'elevation' | 'intensity'
 /** Gradient stops: positions from 0 to 1 and sRGB colors, as a CSS linear-gradient. */
 export type PotreeV2Gradient = readonly (readonly [number, ColorRepresentation])[];
 
+export type PotreeV2GradientName = 'SPECTRAL' | 'VIRIDIS' | 'INFERNO' | 'RAINBOW' | 'GRAYSCALE';
+
+/** Frozen, so that no caller can change a default shared by every cloud. */
+function frozenGradient(stops: [number, string][]): PotreeV2Gradient {
+  return Object.freeze(stops.map(stop => Object.freeze(stop)));
+}
+
 /** Gradients of Potree; SPECTRAL is its default for elevation. */
-export const PotreeV2Gradients = {
-  SPECTRAL: [
+export const PotreeV2Gradients: Readonly<Record<PotreeV2GradientName, PotreeV2Gradient>> = Object.freeze({
+  SPECTRAL: frozenGradient([
     [0, '#5e4fa2'], [0.1, '#3288bd'], [0.2, '#66c2a5'], [0.3, '#abdda4'], [0.4, '#e6f598'], [0.5, '#ffffbf'],
     [0.6, '#fee08b'], [0.7, '#fdae61'], [0.8, '#f46d43'], [0.9, '#d53e4f'], [1, '#9e0142'],
-  ],
-  VIRIDIS: [[0, '#440154'], [0.25, '#3b528b'], [0.5, '#21918c'], [0.75, '#5ec962'], [1, '#fde725']],
-  INFERNO: [[0, '#000004'], [0.2, '#420a68'], [0.4, '#932667'], [0.6, '#dd513a'], [0.8, '#fca50a'], [1, '#fcffa4']],
-  RAINBOW: [
+  ]),
+  VIRIDIS: frozenGradient([[0, '#440154'], [0.25, '#3b528b'], [0.5, '#21918c'], [0.75, '#5ec962'], [1, '#fde725']]),
+  INFERNO: frozenGradient([[0, '#000004'], [0.2, '#420a68'], [0.4, '#932667'], [0.6, '#dd513a'], [0.8, '#fca50a'], [1, '#fcffa4']]),
+  RAINBOW: frozenGradient([
     [0, '#4700b6'], [1 / 6, '#0000ff'], [2 / 6, '#00ffff'], [3 / 6, '#00ff00'], [4 / 6, '#ffff00'],
     [5 / 6, '#ffa300'], [1, '#ff0000'],
-  ],
-  GRAYSCALE: [[0, '#000000'], [1, '#ffffff']],
-} as const satisfies Record<string, PotreeV2Gradient>;
+  ]),
+  GRAYSCALE: frozenGradient([[0, '#000000'], [1, '#ffffff']]),
+});
 
 /** The decoded attribute a color type reads; undefined when it needs none beyond position. */
 export function colorTypeAttribute(type: PotreeV2PointColorType): string | undefined {
@@ -92,8 +99,8 @@ export interface PotreeV2ClassStyle {
   visible?: boolean;
 }
 
-/** Potree's default colors of the ASPRS LAS classes; other codes use DEFAULT_CLASS_COLOR. */
-export const DEFAULT_CLASS_COLORS: Readonly<Record<number, ColorRepresentation>> = {
+/** Potree's default colors of the ASPRS LAS classes; other codes use PotreeV2UnlistedClassColor. Frozen. */
+export const PotreeV2DefaultClassColors: Readonly<Record<number, ColorRepresentation>> = Object.freeze({
   0: '#808080', // never classified
   1: '#808080', // unclassified
   2: '#a1522e', // ground
@@ -105,8 +112,9 @@ export const DEFAULT_CLASS_COLORS: Readonly<Record<number, ColorRepresentation>>
   8: '#ff0000', // key point
   9: '#0000ff', // water
   12: '#ffff00', // overlap
-};
-export const DEFAULT_CLASS_COLOR: ColorRepresentation = '#4d9999';
+});
+/** Potree's color of the classification codes PotreeV2DefaultClassColors does not list. */
+export const PotreeV2UnlistedClassColor: ColorRepresentation = '#4d9999';
 
 /** Classification codes a scheme covers; LAS codes are bytes. */
 const CLASS_COUNT = 256;
@@ -123,7 +131,10 @@ function assertClassCode(code: number): void {
  * uploaded with the next render.
  */
 export class PotreeV2Classification {
-  /** One RGBA texel per code: sRGB color, and alpha 255 when visible or 0 when hidden. */
+  /**
+   * One RGBA texel per code: sRGB color, and alpha 255 when visible or 0 when hidden.
+   * @internal
+   */
   readonly texture: DataTexture;
   private readonly data = new Uint8Array(CLASS_COUNT * 4);
 
@@ -141,7 +152,7 @@ export class PotreeV2Classification {
   /** Restore Potree's default colors and show every class. */
   reset(): void {
     for (let code = 0; code < CLASS_COUNT; code++) {
-      this.data.set([...srgbBytes(DEFAULT_CLASS_COLORS[code] ?? DEFAULT_CLASS_COLOR), 255], code * 4);
+      this.data.set([...srgbBytes(PotreeV2DefaultClassColors[code] ?? PotreeV2UnlistedClassColor), 255], code * 4);
     }
     this.texture.needsUpdate = true;
   }

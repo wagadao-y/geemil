@@ -74,3 +74,12 @@ test('elevation uniforms map metadata z onto the range per node', () => {
   assert.equal((0 + m.uniforms.elevationOffset.value) * m.uniforms.elevationScale.value, 0.4);
   m.dispose();
 });
+
+test('shared defaults cannot be changed by a caller', async () => {
+  const { PotreeV2DefaultClassColors } = await import('../dist/point-color.js');
+  assert.ok(Object.isFrozen(PotreeV2Gradients));
+  assert.ok(Object.isFrozen(PotreeV2Gradients.SPECTRAL));
+  assert.ok(Object.isFrozen(PotreeV2Gradients.SPECTRAL[0]));
+  assert.ok(Object.isFrozen(PotreeV2DefaultClassColors));
+  assert.throws(() => { PotreeV2Gradients.SPECTRAL[0][1] = '#ffffff'; }, TypeError);
+});

@@ -1,9 +1,9 @@
 import { Box3, BufferAttribute, BufferGeometry, Sphere } from 'three';
-import type { OctreeNode, PotreeAttribute, PotreeAttributeType, PotreeV2Metadata } from './format.js';
+import type { OctreeNode, PotreeV2Attribute, PotreeV2AttributeType, PotreeV2Metadata } from './format.js';
 import { decompressBrotli } from './brotli-codecs.js';
 
 /** DataView reader for one element type, chosen once per attribute instead of per value. */
-function elementReader(view: DataView, type: PotreeAttributeType): (at: number) => number {
+function elementReader(view: DataView, type: PotreeV2AttributeType): (at: number) => number {
   switch (type) {
     case 'int8': return at => view.getInt8(at);
     case 'uint8': return at => view.getUint8(at);
@@ -21,7 +21,7 @@ function elementReader(view: DataView, type: PotreeAttributeType): (at: number) 
 type NumberArrayConstructor = new (buffer: ArrayBufferLike, byteOffset: number, length: number) => ArrayLike<number>;
 
 /** Views for element types readable in place; 64-bit integers need BigInt conversion. */
-const typedArrays: Partial<Record<PotreeAttributeType, NumberArrayConstructor>> = {
+const typedArrays: Partial<Record<PotreeV2AttributeType, NumberArrayConstructor>> = {
   int8: Int8Array, uint8: Uint8Array, int16: Int16Array, uint16: Uint16Array,
   int32: Int32Array, uint32: Uint32Array, float: Float32Array, double: Float64Array,
 };
@@ -33,7 +33,7 @@ const littleEndian = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
  * 8- and 16-bit integers keep their type: WebGL reads them as float attributes without
  * normalization, in a half or a quarter of the memory.
  */
-const compactArrays: Partial<Record<PotreeAttributeType, new (length: number) => DecodedArray>> = {
+const compactArrays: Partial<Record<PotreeV2AttributeType, new (length: number) => DecodedArray>> = {
   int8: Int8Array, uint8: Uint8Array, int16: Int16Array, uint16: Uint16Array,
 };
 
@@ -43,7 +43,7 @@ const compactArrays: Partial<Record<PotreeAttributeType, new (length: number) =>
  * `pointStride` the bytes between points.
  */
 function decodeGenericAttribute(
-  data: Uint8Array, view: DataView, attribute: PotreeAttribute, pointCount: number,
+  data: Uint8Array, view: DataView, attribute: PotreeV2Attribute, pointCount: number,
   start: number, pointStride: number,
 ): DecodedArray {
   const { numElements, elementSize, type } = attribute;
@@ -95,7 +95,7 @@ for (let byte = 0; byte < 6; byte++) {
   }
 }
 
-function storageSize(attribute: PotreeAttribute, compressed: boolean): number {
+function storageSize(attribute: PotreeV2Attribute, compressed: boolean): number {
   if (compressed && attribute.name === 'position') return 16;
   if (compressed && attribute.name === 'rgb') return 8;
   return attribute.size;

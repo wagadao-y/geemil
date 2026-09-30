@@ -3,7 +3,7 @@ import {
   LineSegments, Matrix4, Object3D, OrthographicCamera, PerspectiveCamera,
   Points, Sphere, Vector3,
 } from 'three';
-import type { WebGLRenderer } from 'three';
+import type { Box3, WebGLRenderer } from 'three';
 import { createNodeGeometry, DEFAULT_DECODED_ATTRIBUTES, nodeOrigin } from './decode.js';
 import type { DecodedNodeData } from './decode.js';
 import type { NodeDecodeTiming } from './decode.js';
@@ -95,6 +95,10 @@ export interface PotreeV2Options {
   onError?: (error: Error, node: string) => void;
 }
 
+/**
+ * For measurement and debugging, such as the playground's statistics. Unstable: its fields may
+ * change in any release, without a major version.
+ */
 export interface PotreeV2FetchStats {
   /** Successfully fetched and decoded octree Range batches. */
   rangeRequests: number;
@@ -102,6 +106,10 @@ export interface PotreeV2FetchStats {
   fetchedNodes: number;
 }
 
+/**
+ * For measurement and debugging, such as the playground's statistics. Unstable: its fields may
+ * change in any release, without a major version.
+ */
 export interface PotreeV2LoadDiagnostics {
   state: 'loading' | 'complete';
   seconds: number;
@@ -237,15 +245,24 @@ type Candidate = { node: OctreeNode; pixels: number; traversal: Traversal; clip:
 /** Incremented by every traversing update, shared by all clouds so their LRU orders compare. */
 let displayStamp = 0;
 
-/** Clouds that belong to a PotreeV2PointCloudSet, which then owns their updates and budgets. */
+/**
+ * Clouds that belong to a PotreeV2PointCloudSet, which then owns their updates and budgets.
+ * @internal
+ */
 export const cloudSets = new WeakMap<PotreeV2PointCloud, { remove(cloud: PotreeV2PointCloud): boolean }>();
 
-/** Network requests in progress for the clouds that share it; each request returns its slot here. */
+/**
+ * Network requests in progress for the clouds that share it; each request returns its slot here.
+ * @internal
+ */
 export class LoadSlots {
   inFlight = 0;
 }
 
-/** Budgets and limits of one update, shared by the clouds it traverses. */
+/**
+ * Budgets and limits of one update, shared by the clouds it traverses.
+ * @internal
+ */
 export interface UpdateLimits {
   pointBudget: number;
   cachePointBudget: number;
@@ -257,6 +274,7 @@ export interface UpdateLimits {
 /**
  * Select, load and evict nodes of `clouds` under `limits`. `force` traverses even
  * when every cloud's view and settings are unchanged.
+ * @internal
  */
 export let updatePointClouds: (
   clouds: readonly PotreeV2PointCloud[], camera: Camera, viewportHeight: number, limits: UpdateLimits, force: boolean,
@@ -314,8 +332,10 @@ const sharedCandidates = new CandidateHeap();
 /** A camera-driven, additive LOD Potree v2 point cloud. Add `group` to a Three.js scene. */
 export class PotreeV2PointCloud {
   readonly group = new Group();
+  /** @internal */
   readonly root: OctreeNode;
   readonly metadata: PotreeV2Metadata;
+  /** metadata.json position of `group`'s local origin, the bounding box minimum. */
   readonly worldOffset: Vector3;
   readonly material: PotreeV2PointMaterial;
 
@@ -444,6 +464,12 @@ export class PotreeV2PointCloud {
     this.group.name = metadata.name ?? 'Potree v2 point cloud';
   }
 
+  /**
+   * The octree's bounding box in `group`'s local space, from the origin to the size of
+   * metadata.json's bounding box. A new copy on each call.
+   */
+  get boundingBox(): Box3 { return this.root.box.clone(); }
+
   /** Decoded point limit; follows pointBudget unless explicitly overridden. */
   get cachePointBudget(): number { return this.cachePointBudgetOverride ?? this.pointBudget * 2; }
   set cachePointBudget(value: number) { this.cachePointBudgetOverride = value; }
@@ -455,7 +481,7 @@ export class PotreeV2PointCloud {
     this.encodedCache.trim();
   }
 
-  /** Cumulative successful octree range loads since construction or the last clear. */
+  /** Cumulative successful octree range loads since construction or the last clear. Unstable, see PotreeV2FetchStats. */
   get fetchStats(): PotreeV2FetchStats { return { ...this.fetchStatsState }; }
 
   /** Reset counters without counting batches already in progress. */
@@ -465,7 +491,7 @@ export class PotreeV2PointCloud {
     this.fetchStatsState.fetchedNodes = 0;
   }
 
-  /** Timings for the current view load, including Worker decode and scene installation. */
+  /** Timings for the current view load, including Worker decode and scene installation. Unstable, see PotreeV2LoadDiagnostics. */
   get loadDiagnostics(): PotreeV2LoadDiagnostics {
     const seconds = this.diagnosticsState.state === 'loading'
       ? (performance.now() - this.diagnosticsStartedAt) / 1000

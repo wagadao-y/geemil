@@ -97,6 +97,7 @@ void main() {
   #include <fog_fragment>
 }`;
 
+/** @internal */
 export interface PointMaterialOptions {
   size: number; shape: PotreeV2PointShape; sizeType: PotreeV2PointSizeType; minSize: number; maxSize: number;
   spacing: number; visibleNodes: VisibleNodesTexture;
@@ -117,9 +118,14 @@ export interface PointMaterialOptions {
  * With `sizeType` `fixed`, `size` is in CSS pixels, as PointsMaterial's with sizeAttenuation off.
  */
 export class PotreeV2PointMaterial extends ShaderMaterial {
+  /** @internal */
   readonly clip: ClipUniforms;
-  /** Root spacing of the cloud, in its local units. */
+  /**
+   * Root spacing of the cloud, in its local units.
+   * @internal
+   */
   readonly spacing: number;
+  /** @internal */
   readonly visibleNodes: VisibleNodesTexture;
   /** CSS pixels for `fixed`, otherwise a factor of the spacing. */
   size: number;
@@ -147,6 +153,7 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
   private readonly ownClassification?: PotreeV2Classification;
   private readonly viewport = new Vector4();
 
+  /** @internal */
   constructor(options: PointMaterialOptions) {
     const clip = new ClipUniforms();
     const pointSize = new PointSizeUniforms();
@@ -244,20 +251,28 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
     this.needsUpdate = true;
   }
 
+  /** @internal */
   get sizeSettings(): PointSizeSettings {
     return { type: this.pointSizeType, size: this.size, minSize: this.minSize, maxSize: this.maxSize };
   }
 
+  /** @internal */
   get clipCapacity(): ClipCapacity { return this.clip.capacity; }
 
-  /** Recompile with room for `capacity` clips per node. */
+  /**
+   * Recompile with room for `capacity` clips per node.
+   * @internal
+   */
   setClipCapacity(capacity: ClipCapacity): void {
     if (!this.clip.resize(capacity)) return;
     this.defines = { ...this.defines, ...this.clip.defines };
     this.needsUpdate = true;
   }
 
-  /** Called for each node right before it is drawn. */
+  /**
+   * Called for each node right before it is drawn.
+   * @internal
+   */
   setNode(node: OctreeNode, clip: NodeClip, origin: Vector3): void {
     const clipChanged = this.clip.write(clip, origin);
     const nodeChanged = this.pointSize.writeNode(node, this.visibleNodes.index(node));

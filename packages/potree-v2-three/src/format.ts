@@ -1,12 +1,12 @@
 import { Box3, Vector3 } from 'three';
 
-export type PotreeAttributeType =
+export type PotreeV2AttributeType =
   | 'int8' | 'uint8' | 'int16' | 'uint16' | 'int32' | 'uint32'
   | 'int64' | 'uint64' | 'float' | 'double';
 
-export interface PotreeAttribute {
+export interface PotreeV2Attribute {
   name: string;
-  type: PotreeAttributeType;
+  type: PotreeV2AttributeType;
   size: number;
   numElements: number;
   elementSize: number;
@@ -32,7 +32,7 @@ export interface PotreeV2Metadata {
   offset: [number, number, number];
   boundingBox: { min: [number, number, number]; max: [number, number, number] };
   hierarchy: { firstChunkSize: number; stepSize?: number; depth?: number };
-  attributes: PotreeAttribute[];
+  attributes: PotreeV2Attribute[];
 }
 
 export interface OctreeNode {
@@ -118,7 +118,7 @@ export function parseHierarchyChunk(root: OctreeNode, buffer: ArrayBuffer): void
   root.hierarchyLoaded = true;
 }
 
-const typeSizes: Record<PotreeAttributeType, number> = {
+const typeSizes: Record<PotreeV2AttributeType, number> = {
   int8: 1, uint8: 1, int16: 2, uint16: 2, int32: 4, uint32: 4,
   int64: 8, uint64: 8, float: 4, double: 8,
 };

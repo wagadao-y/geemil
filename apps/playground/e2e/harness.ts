@@ -43,7 +43,7 @@ const harness = {
     }
     cloud = await loadPotreeV2(url, { ...options, pointBudget: 10_000_000, minNodePixelSize: 10 })
     scene.add(cloud.group)
-    const box = cloud.root.box
+    const box = cloud.boundingBox
     const center = box.getCenter(new Vector3())
     const size = box.getSize(new Vector3()).length()
     camera.up.set(0, 0, 1)
