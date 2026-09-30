@@ -260,3 +260,5 @@ function animate() {
 ## 開発
 
 リポジトリのルートで `pnpm install`, `pnpm dev` を実行するとライブラリの watch ビルドと playground が起動します。`pnpm build` で両方をビルド、`pnpm test` で形式の読み込みを検証します。
+
+`pnpm test:browser` は Playwright でヘッドレス Chromium を起動し、playground のテスト用ページ（`apps/playground/e2e/harness.html`）で実際に描画して検証します。色の種類ごとのシェーダーと色、隠したクラスの描画とピック、既定で復号する属性、無圧縮（`DEFAULT`）と `BROTLI` で同じ画素になることを確かめます。無圧縮のデータは最初の実行時にサンプルの pump から `apps/playground/e2e/data/` に作ります。WebGL は SwiftShader で描くので GPU は要りません。devcontainer では作成時に Chromium とそのシステムライブラリを入れるので、コンテナを作り直してもそのまま実行できます。devcontainer の外では、先に `pnpm --filter playground exec playwright install --with-deps chromium` を実行してください。

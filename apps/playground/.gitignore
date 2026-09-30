@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Browser tests
+/e2e/data
+/test-results
+/playwright-report

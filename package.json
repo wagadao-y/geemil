@@ -5,6 +5,7 @@
   "scripts": {
     "build": "pnpm --filter @geemil/potree-v2-three build && pnpm --filter playground build",
     "dev": "pnpm --filter @geemil/potree-v2-three build && pnpm -r --parallel --filter @geemil/potree-v2-three --filter playground dev",
-    "test": "pnpm --filter @geemil/potree-v2-three build && pnpm --filter @geemil/potree-v2-three test"
+    "test": "pnpm --filter @geemil/potree-v2-three build && pnpm --filter @geemil/potree-v2-three test",
+    "test:browser": "pnpm --filter @geemil/potree-v2-three build && pnpm --filter playground test:browser"
   }
 }

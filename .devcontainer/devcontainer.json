@@ -17,7 +17,9 @@
 			]
 		}
 	},
-	"forwardPorts": [5173]
+	"forwardPorts": [5173],
+	// Dependencies, and the Chromium build and system libraries of the pinned Playwright for `pnpm test:browser`.
+	"postCreateCommand": "pnpm install && pnpm --filter playground exec playwright install --with-deps chromium"
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
