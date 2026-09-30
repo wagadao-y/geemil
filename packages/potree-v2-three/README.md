@@ -93,7 +93,7 @@ canvas.addEventListener('pointermove', async event => {
 });
 ```
 
-結果の `position` は `cloud.group` の変換を含むワールド座標、`sourcePosition` は metadata.json の座標系、`attributes` は復号した `position` 以外の属性（`rgb` は 0〜255）です。カメラに `setViewOffset` を設定している場合には対応していません。
+結果の `position` は `cloud.group` の変換を含むワールド座標、`sourcePosition` は metadata.json の座標系、`attributes` は復号した `position` 以外の属性（`rgb` は 0〜255）です。`attributes` の値は GPU に送った attribute から読むので、8・16 bit の整数属性以外は元の値と一致しないことがあります。32 bit の整数と 64 bit の浮動小数点数は float32 に丸めた値です。64 bit の単一値属性（`gps-time` など）は metadata の min/max で 0〜1 に正規化した値で、元の値の精度は残っていません。カメラに `setViewOffset` を設定している場合には対応していません。
 
 認証付きの取得には `fetch` を差し替えます。この関数は metadata、hierarchy、octree のすべての取得に使われます。Range ヘッダーと `signal` を維持し、hierarchy と octree には要求した範囲を HTTP 206 で返してください。
 
