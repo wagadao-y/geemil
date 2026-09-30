@@ -144,7 +144,7 @@ appearanceFolder.add(settings, 'edlRadius', 0.5, 4, 0.1).name('EDL の半径 (px
 appearanceFolder.add(settings, 'pointBudgetMP', 0.5, 20, 0.5).name('点数予算 (MP)').onChange((value: number) => {
   if (cloud) cloud.pointBudget = value * 1_000_000
 })
-appearanceFolder.add(settings, 'minNodePixelSize', 0, 1000, 1).name('最小ノード投影半径 (px)').onChange((value: number) => {
+appearanceFolder.add(settings, 'minNodePixelSize', 0, 200, 1).name('最小ノード投影半径 (px)').onChange((value: number) => {
   if (cloud) cloud.minNodePixelSize = value
 })
 appearanceFolder.add(settings, 'maxNodesToGPUPerFrame', [1, 2, 4, 8, 16, 32, 64])
