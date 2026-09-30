@@ -526,6 +526,23 @@ test('a failed range fails only its own nodes and keeps the others of the load',
   }
 });
 
+test('a perspective camera zoom refines the nodes it magnifies', async () => {
+  const { fetcher } = flakyCloudFetcher(childFiles, {});
+  // The child projects to about 99 px at zoom 1 and 198 px at zoom 2.
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, minNodePixelSize: 150 });
+  try {
+    const camera = childViewCamera();
+    cloud.update(camera, 600);
+    assert.equal(cloud.loadDiagnostics.requiredNodes, 1);
+    camera.zoom = 2;
+    camera.updateProjectionMatrix();
+    await waitFor(() => { cloud.update(camera, 600); return cloud.group.children.length === 2; });
+    assert.equal(cloud.loadDiagnostics.requiredNodes, 2);
+  } finally {
+    cloud.dispose();
+  }
+});
+
 test('loads a selected local folder using slices of the binary files', async () => {
   const hierarchy = concat(record(1, 1, 1, 0, 18), record(0, 0, 1, 18, 18));
   const octree = concat(uncompressedPoint(2, 4, 6, 255, 0, 0), uncompressedPoint(4, 6, 8, 0, 255, 0));

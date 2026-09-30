@@ -1320,11 +1320,14 @@ function projectedRadius(
   worldMatrix: Matrix4, sphere: Sphere, height: number,
 ): number {
   box.getBoundingSphere(sphere).applyMatrix4(worldMatrix);
-  if (camera instanceof OrthographicCamera) return sphere.radius * height * camera.zoom / (camera.top - camera.bottom);
+  // Pixels per world unit (at distance 1 for perspective cameras), read from the matrix
+  // the view is rendered with, so `zoom` and view offsets count as they do on screen.
+  const pixelsPerUnit = camera.projectionMatrix.elements[5]! * height / 2;
+  if (camera instanceof OrthographicCamera) return sphere.radius * pixelsPerUnit;
   if (camera instanceof PerspectiveCamera) {
     const distance = cameraPosition.distanceTo(sphere.center);
     if (distance < sphere.radius) return Infinity;
-    return sphere.radius * height / (2 * distance * Math.tan(camera.fov * Math.PI / 360));
+    return sphere.radius * pixelsPerUnit / distance;
   }
   return Infinity;
 }
