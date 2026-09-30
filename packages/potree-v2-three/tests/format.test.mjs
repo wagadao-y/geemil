@@ -112,6 +112,23 @@ test('an invalid hierarchy chunk leaves the tree unchanged so that it can be par
   assert.equal(root.hierarchyLoaded, true);
 });
 
+test('rejects metadata whose numbers the octree cannot use', () => {
+  const invalid = [
+    [{ scale: [0.5, 0, 0.5] }, /scale/],
+    [{ scale: [0.5, 0.5] }, /scale/],
+    [{ offset: [100, 200, NaN] }, /offset/],
+    [{ boundingBox: { min: [100, 200], max: [108, 208, 308] } }, /boundingBox/],
+    [{ boundingBox: { min: [100, 200, 300], max: [108, 208, 300] } }, /boundingBox/],
+    [{ spacing: 0 }, /spacing/],
+    [{ spacing: '1' }, /spacing/],
+    [{ hierarchy: { firstChunkSize: 23 } }, /firstChunkSize/],
+    [{ hierarchy: { firstChunkSize: 0 } }, /firstChunkSize/],
+    [{ hierarchy: undefined }, /Incomplete/],
+  ];
+  for (const [change, error] of invalid) assert.throws(() => validateMetadata({ ...base, ...change }), error);
+  assert.equal(validateMetadata(base), base);
+});
+
 test('decodes uncompressed positions and 16-bit colors', async () => {
   const node = createRoot(base);
   node.numPoints = 1;

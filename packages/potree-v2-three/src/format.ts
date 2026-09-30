@@ -137,6 +137,10 @@ const typeSizes: Record<PotreeV2AttributeType, number> = {
   int64: 8, uint64: 8, float: 4, double: 8,
 };
 
+function isFiniteVector(value: readonly unknown[]): value is [number, number, number] {
+  return value.length === 3 && value.every(Number.isFinite);
+}
+
 export function validateMetadata(value: unknown): PotreeV2Metadata {
   if (typeof value !== 'object' || value === null) throw new Error('Invalid Potree metadata');
   const m = value as PotreeV2Metadata;
@@ -147,11 +151,25 @@ export function validateMetadata(value: unknown): PotreeV2Metadata {
   if (!Array.isArray(m.attributes) || !m.attributes.some(a => a.name === 'position')) {
     throw new Error('Potree v2 metadata has no position attribute');
   }
-  if (!Array.isArray(m.scale) || m.scale.length !== 3 ||
-      !Array.isArray(m.offset) || m.offset.length !== 3 ||
+  if (!Array.isArray(m.scale) || !Array.isArray(m.offset) ||
       !Array.isArray(m.boundingBox?.min) || !Array.isArray(m.boundingBox?.max) ||
-      !Number.isSafeInteger(m.hierarchy?.firstChunkSize) || m.hierarchy.firstChunkSize < 22) {
+      typeof m.hierarchy !== 'object' || m.hierarchy === null) {
     throw new Error('Incomplete Potree v2 metadata');
+  }
+  if (!isFiniteVector(m.scale) || !m.scale.every(value => value > 0)) {
+    throw new Error('Invalid Potree v2 metadata: scale must be three positive numbers');
+  }
+  if (!isFiniteVector(m.offset)) throw new Error('Invalid Potree v2 metadata: offset must be three finite numbers');
+  const { min, max } = m.boundingBox;
+  if (!isFiniteVector(min) || !isFiniteVector(max) || !min.every((value, axis) => max[axis]! > value)) {
+    throw new Error('Invalid Potree v2 metadata: boundingBox must have three finite axes with max above min');
+  }
+  if (!Number.isFinite(m.spacing) || !(m.spacing > 0)) {
+    throw new Error('Invalid Potree v2 metadata: spacing must be a positive number');
+  }
+  const { firstChunkSize } = m.hierarchy;
+  if (!Number.isSafeInteger(firstChunkSize) || firstChunkSize < 22 || firstChunkSize % 22 !== 0) {
+    throw new Error('Invalid Potree v2 metadata: hierarchy.firstChunkSize must be a positive multiple of 22');
   }
   for (const a of m.attributes) {
     if (!(a.type in typeSizes) || !Number.isInteger(a.numElements) || a.numElements < 1 ||
