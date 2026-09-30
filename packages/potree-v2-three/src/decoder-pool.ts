@@ -50,6 +50,9 @@ export class DecoderPool {
 
   constructor(public maxWorkers: number) {}
 
+  /** Its Workers failed, so every decode rejects; acquire() returns a new pool. */
+  get failed(): boolean { return this.workerFailure !== undefined; }
+
   /** Jobs waiting for or running on a Worker. */
   get backlog(): number {
     return this.queue.length + this.workers.reduce((n, slot) => n + (slot.job ? 1 : 0), 0);

@@ -367,7 +367,7 @@ export class PotreeV2PointCloud {
   /** Decoded nodes waiting for installation; `rank` is scratch space for installDecodedNodes. */
   private readonly decodedQueue: { node: OctreeNode; attributes: DecodedNodeData; rank: number }[] = [];
   private readonly controller = new AbortController();
-  private readonly decoder: DecoderPool;
+  private decoder: DecoderPool;
   private readonly encodedCache: EncodedNodeCache;
   private readonly boxGeometry: EdgesGeometry;
   private readonly boxMaterial: LineBasicMaterial;
@@ -591,6 +591,19 @@ export class PotreeV2PointCloud {
     }
   }
 
+  /**
+   * The shared decoder pool. A pool whose Workers failed rejects every decode, so it is
+   * exchanged for the current one; otherwise retries of this cloud could never succeed.
+   */
+  private liveDecoder(): DecoderPool {
+    if (this.decoder.failed && !this.disposed) {
+      this.decoder.release();
+      this.decoder = DecoderPool.acquire(this.decoderWorkers);
+      this.decoder.warm(this.metadata.encoding === 'BROTLI');
+    }
+    return this.decoder;
+  }
+
   private noteDecodeTiming(timing: NodeDecodeTiming, generation: number): void {
     if (this.disposed || generation !== this.diagnosticsGeneration) return;
     this.diagnosticsState.codecSetupMs += timing.setupMs;
@@ -683,7 +696,7 @@ export class PotreeV2PointCloud {
           this.encodedCache.put(node, bytes.slice(at, at + Number(node.byteSize)));
         }
       }
-      const decoded = await this.decoder.decodeBatch(
+      const decoded = await this.liveDecoder().decodeBatch(
         bytes, batch.start,
         batch.nodes.map(node => ({
           name: node.name, pointCount: node.numPoints, offset: node.byteOffset, size: node.byteSize, origin: nodeOrigin(node),
@@ -720,7 +733,7 @@ export class PotreeV2PointCloud {
       });
       offset += bytes.byteLength;
     }
-    return this.decoder.decodeBatch(combined.buffer, 0n, requests, this.metadata,
+    return this.liveDecoder().decodeBatch(combined.buffer, 0n, requests, this.metadata,
       timing => this.noteDecodeTiming(timing, diagnosticsGeneration), this.decodedAttributes, this.controller.signal);
   }
 
@@ -840,7 +853,7 @@ export class PotreeV2PointCloud {
     plans.sort((a, b) => a.rank - b.rank);
     for (const { cloud, batch } of plans) {
       if (limits.slots.inFlight >= limits.maxConcurrentLoads) break;
-      const decoder = cloud.decoder;
+      const decoder = cloud.liveDecoder();
       if (cloud.gate.available() <= 0 || decoder.backlog >= decoder.maxWorkers * 2) continue;
       cloud.startBatch(batch, limits.slots);
     }

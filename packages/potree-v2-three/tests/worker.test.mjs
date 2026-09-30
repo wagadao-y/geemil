@@ -6,6 +6,7 @@ import { createServer } from 'node:http';
 import { DecoderPool } from '../dist/decoder-pool.js';
 import { makeNodeBatches } from '../dist/batches.js';
 import { fetchRange } from '../dist/http.js';
+import { loadPotreeV2 } from '../dist/index.js';
 
 const metadata = {
   version: '2.0', encoding: 'DEFAULT', points: 1, spacing: 1,
@@ -212,5 +213,42 @@ test('an aborted job leaves the queue while a running job completes', { timeout:
   } finally {
     pool.dispose();
     globalThis.Worker = originalWorker;
+  }
+});
+
+test('a cloud whose shared pool failed decodes with a new pool', { timeout: 5000 }, async () => {
+  const restore = installNodeWorker();
+  const point = new Uint8Array(12);
+  new DataView(point.buffer).setInt32(0, 3, true);
+  const hierarchy = new Uint8Array(44);
+  const view = new DataView(hierarchy.buffer);
+  const record = (at, type, mask, offset) => {
+    view.setUint8(at, type);
+    view.setUint8(at + 1, mask);
+    view.setUint32(at + 2, 1, true);
+    view.setBigUint64(at + 6, BigInt(offset), true);
+    view.setBigUint64(at + 14, 12n, true);
+  };
+  record(0, 1, 1, 0);
+  record(22, 0, 0, 12);
+  const files = { 'hierarchy.bin': hierarchy, 'octree.bin': new Uint8Array([...point, ...point]) };
+  const fetcher = async (url, init = {}) => {
+    const name = new URL(url).pathname.split('/').at(-1);
+    if (name === 'metadata.json') return new Response(JSON.stringify({ ...metadata, points: 2, hierarchy: { firstChunkSize: 44 } }));
+    const match = /bytes=(\d+)-(\d+)/.exec(init.headers.Range);
+    return new Response(files[name].slice(Number(match[1]), Number(match[2]) + 1), { status: 206 });
+  };
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, decoderWorkers: 1 });
+  try {
+    const failed = cloud.decoder;
+    failed.failWorkers(new Error('Worker script failed to load'));
+    const child = cloud.root.children[0];
+    assert.deepEqual(await cloud.loadBatch([child]), []);
+    assert.notEqual(cloud.decoder, failed);
+    assert.equal(cloud.decoder.failed, false);
+    assert.deepEqual([...cloud.decodedQueue.at(-1).attributes.position.array], [3, 0, 0]);
+  } finally {
+    cloud.dispose();
+    restore();
   }
 });
