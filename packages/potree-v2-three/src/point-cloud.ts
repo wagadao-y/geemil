@@ -582,6 +582,19 @@ export class PotreeV2PointCloud {
       Math.min(this.retryDelayMs * 2 ** (state.failures - 1), MAX_RETRY_DELAY_MS);
   }
 
+  /**
+   * Pass a load error to onError. An exception from onError is rethrown on its own, as an
+   * event listener's is, so that it neither stops the caller's bookkeeping, such as the
+   * retry delays of the other failed nodes, nor becomes an unhandled rejection of a load.
+   */
+  private reportError(error: unknown, node: string): void {
+    try {
+      this.onError?.(error instanceof Error ? error : new Error(String(error)), node);
+    } catch (thrown) {
+      queueMicrotask(() => { throw thrown; });
+    }
+  }
+
   private async loadHierarchy(node: OctreeNode): Promise<void> {
     if (node.hierarchyLoaded) return;
     const generation = this.diagnosticsGeneration;
@@ -862,7 +875,7 @@ export class PotreeV2PointCloud {
       // A throttled node is not at fault: the gate pauses the origin and update() retries it.
       if (!this.disposed && !isAbort(error) && !isThrottled(error)) {
         this.noteFailure(state);
-        this.onError?.(error instanceof Error ? error : new Error(String(error)), node.name);
+        this.reportError(error, node.name);
       }
     }).finally(() => {
       state.loading = undefined;
@@ -961,7 +974,7 @@ export class PotreeV2PointCloud {
       if (this.disposed || isAbort(error) || isThrottled(error)) return;
       for (const node of failed) {
         this.noteFailure(this.state(node));
-        this.onError?.(error instanceof Error ? error : new Error(String(error)), node.name);
+        this.reportError(error, node.name);
       }
     };
     const promise = this.loadBatch(nodes, releaseRequest, signal).then(failures => {

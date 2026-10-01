@@ -754,6 +754,51 @@ test('waits for the retry delay before requesting a failed node again', async ()
   }
 });
 
+test('an onError that throws neither skips the retry delay of other failed nodes nor rejects the load', async () => {
+  const files = {
+    'metadata.json': JSON.stringify({ ...base, points: 3, hierarchy: { firstChunkSize: 66 } }),
+    // Two children whose adjacent ranges are fetched as one batch.
+    'hierarchy.bin': concat(record(1, 3, 1, 0, 18), record(0, 0, 1, 18, 18), record(0, 0, 1, 36, 18)),
+    'octree.bin': concat(
+      uncompressedPoint(8, 8, 8, 0, 0, 0), uncompressedPoint(2, 2, 2, 0, 0, 0), uncompressedPoint(2, 2, 12, 0, 0, 0),
+    ),
+  };
+  const { fetcher, requests } = flakyCloudFetcher(files, { 'octree.bin bytes=18-53': 1 });
+  const errors = [];
+  // The thrown errors surface on their own; catch them instead of failing the test run.
+  const thrown = [];
+  const rejections = [];
+  const saved = ['uncaughtException', 'unhandledRejection'].map(event => [event, process.rawListeners(event)]);
+  for (const [event] of saved) process.removeAllListeners(event);
+  process.on('uncaughtException', error => thrown.push(error.message));
+  process.on('unhandledRejection', reason => rejections.push(reason));
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher, minNodePixelSize: 1, retryDelayMs: 60_000,
+    onError: (error, node) => {
+      errors.push(node);
+      throw new Error(`application failed on ${node}`);
+    },
+  });
+  try {
+    const camera = childViewCamera();
+    await waitFor(() => { cloud.update(camera, 600); return errors.length === 2; });
+    for (let i = 0; i < 20; i++) {
+      cloud.update(camera, 600);
+      await new Promise(resolve => setTimeout(resolve, 1));
+    }
+    assert.deepEqual(errors.sort(), ['r0', 'r1']);
+    assert.equal(requests.filter(r => r === 'octree.bin bytes=18-53').length, 1);
+    assert.deepEqual(thrown.sort(), ['application failed on r0', 'application failed on r1']);
+    assert.deepEqual(rejections, []);
+  } finally {
+    cloud.dispose();
+    for (const [event, listeners] of saved) {
+      process.removeAllListeners(event);
+      for (const listener of listeners) process.on(event, listener);
+    }
+  }
+});
+
 test('parses Retry-After seconds and HTTP dates', () => {
   assert.equal(parseRetryAfter('3'), 3000);
   assert.equal(parseRetryAfter('Wed, 21 Oct 2015 07:28:05 GMT', Date.parse('Wed, 21 Oct 2015 07:28:00 GMT')), 5000);
