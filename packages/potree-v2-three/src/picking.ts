@@ -152,7 +152,8 @@ type Drawn<Owner> = { layer: PickLayer<Owner>; target: PickTarget; shader: PickS
  * depth resolve alike: the one drawn last wins. Three.js sorts opaque objects by group order,
  * render order, material and then distance. Pick shaders are created in another order than
  * the display materials, so the display's group order, render order and material become each
- * proxy's render order; within one rank the proxies share a pick shader and sort by distance.
+ * proxy's render order; within one rank the proxies share a pick shader and sort by distance
+ * and then id, which pick() assigns in the order of the node objects' ids.
  */
 function orderAsDisplayed(drawn: readonly Drawn<unknown>[], proxies: readonly Points[]): void {
   // Every material has the id Three.js sorts by, but its type declarations omit it.
@@ -275,7 +276,11 @@ export class PointPicker {
       this.projection.multiplyMatrices(pickCamera.projectionMatrix, pickCamera.matrixWorldInverse).multiply(layer.groupMatrix);
       this.frustum.setFromProjectionMatrix(this.projection);
       let shader: PickShader | undefined;
-      for (const target of layer.targets) {
+      // Three.js breaks ties of material and distance by object id. Proxies are created, and
+      // so numbered, in index order: assigning them in the order of the node objects' ids
+      // makes nodes of equal distance draw in the same order as displayed.
+      const targets = [...layer.targets].sort((a, b) => a.points.id - b.points.id);
+      for (const target of targets) {
         if (!this.frustum.intersectsBox(target.node.box)) continue;
         if (!shader) {
           shader = this.shader(layer.display);
