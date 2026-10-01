@@ -167,6 +167,15 @@ export class DecoderPool {
       }
       this.pump();
     };
+    // A response that cannot be deserialized has no id, but a Worker runs one job at a time.
+    // Without this, the job would never settle and its nodes would never be requested again.
+    worker.onmessageerror = () => {
+      const job = slot.job;
+      if (!job) return;
+      slot.job = undefined;
+      job.reject(new Error('Potree decoder response could not be deserialized'));
+      this.pump();
+    };
     worker.onerror = event => {
       event.preventDefault();
       this.failWorkers(new Error(`Potree decoder worker failed: ${event.message}`));

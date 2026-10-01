@@ -218,6 +218,32 @@ test('an aborted job leaves the queue while a running job completes', { timeout:
   }
 });
 
+test('a response that cannot be deserialized rejects its job and frees the Worker', { timeout: 5000 }, async () => {
+  const originalWorker = globalThis.Worker;
+  const posted = [];
+  globalThis.Worker = class {
+    postMessage(message) { posted.push({ worker: this, message }); }
+    terminate() {}
+  };
+  const pool = new DecoderPool(1);
+  try {
+    const first = pool.decodeBatch(new ArrayBuffer(0), 0n, [], metadata);
+    const second = pool.decodeBatch(new ArrayBuffer(0), 0n, [], metadata);
+    posted[0].worker.onmessageerror(new MessageEvent('messageerror'));
+    await assert.rejects(first, /could not be deserialized/);
+    // The Worker takes the next job, and the pool stays usable.
+    assert.equal(posted.length, 2);
+    assert.equal(pool.failed, false);
+    const { worker, message } = posted[1];
+    worker.onmessage({ data: { id: message.id, nodes: [] } });
+    assert.deepEqual(await second, []);
+    assert.equal(pool.backlog, 0);
+  } finally {
+    pool.dispose();
+    globalThis.Worker = originalWorker;
+  }
+});
+
 test('a cloud whose shared pool failed decodes with a new pool', { timeout: 5000 }, async () => {
   const restore = installNodeWorker();
   const point = new Uint8Array(12);
