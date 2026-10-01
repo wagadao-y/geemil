@@ -1019,33 +1019,40 @@ export class PotreeV2PointCloud {
     const stamp = ++displayStamp;
     // One heap across clouds: the budget goes to the largest projected nodes of any cloud, as in Potree.
     const candidates = sharedCandidates;
-    const traversals = active.map(cloud => cloud.beginTraversal(camera, candidates));
-    let pointsUsed = 0;
-    let selectedCount = 0;
-    while (candidates.size > 0) {
-      const candidate = candidates.pop();
-      const { node, traversal } = candidate;
-      const cloud = traversal.cloud;
-      if (node.numPoints > 0) {
-        // Candidates arrive largest first, so every remaining node would be less
-        // important than the one that no longer fits: stop, as Potree does.
-        if (pointsUsed + node.numPoints > pointBudget && selectedCount > 0) break;
-        pointsUsed += node.numPoints;
-        cloud.selectionRank.set(node, selectedCount++);
-        traversal.selected.add(node);
-        if (candidate.clip !== NO_CLIP) cloud.nodeClips.set(node, candidate.clip);
-      } else if (node.type !== 2 || node.hierarchyLoaded) {
-        traversal.empty.push(node);
+    // A traversal that throws, such as on an invalid clip box, is repeated by the next update.
+    for (const cloud of active) cloud.settled = false;
+    let traversals: Traversal[];
+    try {
+      traversals = active.map(cloud => cloud.beginTraversal(camera, candidates));
+      let pointsUsed = 0;
+      let selectedCount = 0;
+      while (candidates.size > 0) {
+        const candidate = candidates.pop();
+        const { node, traversal } = candidate;
+        const cloud = traversal.cloud;
+        if (node.numPoints > 0) {
+          // Candidates arrive largest first, so every remaining node would be less
+          // important than the one that no longer fits: stop, as Potree does.
+          if (pointsUsed + node.numPoints > pointBudget && selectedCount > 0) break;
+          pointsUsed += node.numPoints;
+          cloud.selectionRank.set(node, selectedCount++);
+          traversal.selected.add(node);
+          if (candidate.clip !== NO_CLIP) cloud.nodeClips.set(node, candidate.clip);
+        } else if (node.type !== 2 || node.hierarchyLoaded) {
+          traversal.empty.push(node);
+        }
+        if (node.type === 2 && !node.hierarchyLoaded) {
+          traversal.hierarchyPending++;
+          cloud.requestHierarchy(node, limits);
+          continue;
+        }
+        if (node.numPoints > 0) traversal.pending.push(node);
+        cloud.pushChildren(candidate, camera, viewportHeight, candidates);
       }
-      if (node.type === 2 && !node.hierarchyLoaded) {
-        traversal.hierarchyPending++;
-        cloud.requestHierarchy(node, limits);
-        continue;
-      }
-      if (node.numPoints > 0) traversal.pending.push(node);
-      cloud.pushChildren(candidate, camera, viewportHeight, candidates);
+    } finally {
+      // The heap is shared by every update; candidates left by a throw would join the next selection.
+      candidates.clear();
     }
-    candidates.clear();
     for (const cloud of active) cloud.fitClipCapacity();
     for (const { cloud, selected } of traversals) cloud.abortStaleRequests(selected);
     let changed = PotreeV2PointCloud.installDecodedNodes(active, limits.maxNodesToGPUPerFrame);

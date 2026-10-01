@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Box3, Matrix4, PerspectiveCamera, Plane, Quaternion, Vector3 } from 'three';
-import { loadPotreeV2, PotreeV2Clipping } from '../dist/index.js';
+import { loadPotreeV2, PotreeV2Clipping, PotreeV2PointCloudSet } from '../dist/index.js';
 import { ClipUniforms, clipNode, NO_CLIP, snapshotClipping } from '../dist/clipping.js';
 
 async function waitFor(predicate) {
@@ -338,6 +338,43 @@ test('clouds sharing a clipping pick up its changes and grow the shader capacity
     await settle(a.cloud, a.camera);
     // The capacity never shrinks, so clearing clips does not recompile.
     assert.equal(a.cloud.material.defines.POTREE_CLIP_BOXES, 32);
+  } finally {
+    a.cloud.dispose();
+    b.cloud.dispose();
+  }
+});
+
+test('a traversal that throws leaves no candidates for the next one and is repeated', async () => {
+  // Keeps every point, so the first cloud pushes its root before the second one throws.
+  const kept = new PotreeV2Clipping();
+  kept.addPlane({ plane: new Plane(new Vector3(0, 0, 1), 1000) });
+  const broken = new PotreeV2Clipping();
+  const box = broken.addBox({ matrix: boxMatrix([50, 50, 50], [1, 1, 1]), mode: 'hide-inside' });
+  const a = await loadFixture({ clipping: kept });
+  const b = await loadFixture({ clipping: broken });
+  // Exactly the four one-point nodes of each cloud fit.
+  const set = new PotreeV2PointCloudSet({ pointBudget: 8 });
+  set.add(a.cloud);
+  set.add(b.cloud);
+  const required = () => a.cloud.loadDiagnostics.requiredNodes + b.cloud.loadDiagnostics.requiredNodes;
+  try {
+    await waitFor(() => {
+      set.update(a.camera, 600);
+      return a.cloud.settled && b.cloud.settled;
+    });
+    assert.equal(required(), 8);
+
+    box.matrix.makeScale(0, 0, 0);
+    assert.throws(() => set.update(a.camera, 600), /invertible/);
+    // The view is unchanged, but the failed traversal is not taken as settled.
+    assert.throws(() => set.update(a.camera, 600), /invertible/);
+
+    // Candidates left by the throws would take part of the budget.
+    box.matrix.copy(boxMatrix([50, 50, 50], [1, 1, 1]));
+    set.update(a.camera, 600);
+    assert.equal(required(), 8);
+    assert.deepEqual(shownNodes(a.cloud), ['r', 'r0', 'r1', 'r2']);
+    assert.deepEqual(shownNodes(b.cloud), ['r', 'r0', 'r1', 'r2']);
   } finally {
     a.cloud.dispose();
     b.cloud.dispose();
