@@ -1,0 +1,229 @@
+:root {
+  --bg: #f4f6f7;
+  --panel: #ffffff;
+  --panel-2: #f8fafa;
+  --line: #e2e6e8;
+  --line-strong: #cfd5d8;
+  --text: #182026;
+  --text-2: #3d474f;
+  --muted: #69747d;
+  --faint: #9aa3aa;
+  --accent: #0f766e;
+  --accent-hover: #0c625b;
+  --accent-soft: #e7f4f2;
+  --accent-line: #9fd6cf;
+  --accent-bright: #2dd4bf;
+  --warn: #b45309;
+  --warn-soft: #fdf3e6;
+  --danger: #c0392b;
+  --danger-soft: #fdeceb;
+  --info: #4f46e5;
+  --info-soft: #eef0fe;
+  --viewport: #12171c;
+  --glass: rgb(22 28 34 / 78%);
+  --glass-line: rgb(255 255 255 / 12%);
+  --radius: 8px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 2px rgb(16 24 32 / 6%), 0 4px 16px rgb(16 24 32 / 8%);
+  --shadow-lg: 0 8px 32px rgb(16 24 32 / 18%);
+  --font:
+    'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', 'Yu Gothic UI', Meiryo, system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-bright);
+  outline-offset: 1px;
+}
+
+.mono {
+  font-family: var(--mono);
+  letter-spacing: 0.01em;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text-2);
+  font-weight: 500;
+  white-space: nowrap;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s;
+}
+.btn:hover {
+  background: var(--panel-2);
+  border-color: var(--faint);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn.primary:hover {
+  background: var(--accent-hover);
+}
+.btn.outline {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.btn.outline:hover {
+  background: var(--accent-soft);
+}
+.btn.ghost {
+  border-color: transparent;
+  background: transparent;
+}
+.btn.ghost:hover {
+  background: rgb(0 0 0 / 5%);
+}
+.btn.block {
+  width: 100%;
+}
+.btn.sm {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+.icon-btn:hover {
+  background: rgb(0 0 0 / 6%);
+  color: var(--text);
+}
+
+/* Form fields */
+.field {
+  display: grid;
+  gap: 4px;
+}
+.field > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  outline: none;
+}
+textarea.input {
+  height: auto;
+  min-height: 64px;
+  padding: 7px 10px;
+  resize: vertical;
+}
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(15 118 110 / 14%);
+}
+
+/* Category chips */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.chip.equipment {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.chip.note {
+  background: var(--info-soft);
+  color: var(--info);
+}
+.chip.issue {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* Glass controls over the 3D view */
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  color: #e8edf0;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}

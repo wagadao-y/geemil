@@ -10,3 +10,5 @@ apps/playground/public/
 packages/potree-v2-three/tests/data/
 pnpm-lock.yaml
 .devcontainer/devcontainer-lock.json
+**/.svelte-kit/
+apps/web/build/

@@ -5,6 +5,7 @@ PotreeConverter v2 の点群を Three.js で表示するライブラリと、そ
 ```text
 packages/potree-v2-three/  v2 専用ライブラリ
 apps/playground/           Vite + TypeScript の確認画面
+apps/web/                  Spatial Hub（SvelteKit の SPA。施設の 3D 情報ハブ）
 ```
 
 ```sh
@@ -16,7 +17,9 @@ pnpm dev
 
 同梱の `apps/playground/public/pump/` は、[libE57 のテストデータ](http://www.libe57.org/data.html) `PumpNoInvalidPoints.e57`（© 2008 Carnahan-Proctor and Cross, Inc.）を PotreeConverter で Potree 2.0 形式に変換したものです。ライセンスは同じフォルダの `LICENSE.txt`（libE57 Test Data License）を参照してください。
 
-`pnpm build` は両プロジェクトをビルドし、`pnpm test` はライブラリの形式解析と読込を検証します。ライブラリの API は [パッケージ README](packages/potree-v2-three/README.md) を参照してください。
+Spatial Hub は `pnpm dev:web` で起動します。いまはデモデータ（`apps/web/src/lib/api/demo-data.ts`）で動き、追加した注記・保存ビューはブラウザの localStorage に保存されます。点群は playground の `pump` を共有し、屋外メッシュは建屋の形から生成した代用品です。画面の構成は [apps/web/README.md](apps/web/README.md) を参照してください。
+
+`pnpm build` はすべてのプロジェクトをビルドし、`pnpm test` はライブラリの形式解析と読込を検証します。ライブラリの API は [パッケージ README](packages/potree-v2-three/README.md) を参照してください。
 
 コードの検査と整形はルートで実行します。
 

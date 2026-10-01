@@ -7,8 +7,10 @@
     "lint:fix": "eslint . --fix --max-warnings 0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "build": "pnpm --filter @geemil/potree-v2-three build && pnpm --filter playground build",
+    "build": "pnpm --filter @geemil/potree-v2-three build && pnpm --filter playground build && pnpm --filter web build",
+    "check": "pnpm --filter @geemil/potree-v2-three build && pnpm --filter web check",
     "dev": "pnpm --filter @geemil/potree-v2-three build && pnpm -r --parallel --filter @geemil/potree-v2-three --filter playground dev",
+    "dev:web": "pnpm --filter @geemil/potree-v2-three build && pnpm -r --parallel --filter @geemil/potree-v2-three --filter web dev",
     "test": "pnpm --filter @geemil/potree-v2-three build && pnpm --filter @geemil/potree-v2-three test",
     "test:browser": "pnpm --filter @geemil/potree-v2-three build && pnpm --filter playground test:browser"
   },
@@ -16,8 +18,11 @@
     "@eslint/js": "^10.0.1",
     "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-svelte": "^3.23.0",
     "globals": "17.12.0",
     "prettier": "3.9.9",
+    "prettier-plugin-svelte": "^4.1.1",
+    "svelte-eslint-parser": "^1.8.1",
     "typescript-eslint": "^8.71.0"
   }
 }
