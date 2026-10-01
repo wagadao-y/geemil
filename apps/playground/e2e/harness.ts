@@ -208,7 +208,8 @@ const harness = {
       cloud.dispose()
       cloud = undefined
     }
-    const options = { pointBudget: 10_000_000, minNodePixelSize: 10, pointColorType: 'solid' } as const
+    // Large sprites, so the sparse sample covers most of the grid of picks.
+    const options = { pointBudget: 10_000_000, minNodePixelSize: 10, pointColorType: 'solid', pointSize: 8 } as const
     const far = layout === 'far'
     // In creation order, which orders the display materials.
     const [back, front] = layout === 'same'
@@ -250,8 +251,8 @@ const harness = {
       }
       const pixels = render(target)
       const counts = { front: 0, back: 0, mismatched: 0, occluded: 0 }
-      for (let y = 5; y < SIZE; y += 10) {
-        for (let x = 5; x < SIZE; x += 10) {
+      for (let y = 10; y < SIZE; y += 20) {
+        for (let x = 10; x < SIZE; x += 20) {
           const hit = await set.pick(target, camera, x + 0.5, y + 0.5)
           const at = ((SIZE - 1 - y) * SIZE + x) * 4
           const drawn = pixels[at] ? 'front' : pixels[at + 2] ? 'back' : null

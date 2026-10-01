@@ -2,8 +2,8 @@ import { expect, test, type Page } from '@playwright/test'
 import { CLASS_BANDS } from './global-setup'
 import type { Capture, ColorSettings, Harness } from './harness'
 
-const BROTLI = '/pump/metadata.json'
-/** Written by global-setup.ts from the BROTLI sample. */
+/** The 2000-point pump sample's two PotreeConverter outputs, copied by global-setup.ts. */
+const BROTLI = '/e2e/data/pump-brotli/metadata.json'
 const DEFAULT = '/e2e/data/pump-default/metadata.json'
 /** DEFAULT with the classes of CLASS_BANDS by x, also written by global-setup.ts. */
 const CLASSES = '/e2e/data/pump-classes/metadata.json'
@@ -164,13 +164,15 @@ test('DEFAULT and BROTLI encodings draw the same pixels', async ({ page }) => {
       await setColor(page, { type })
       images.push((await capture(page)).digest)
     }
-    return { encoding: loaded.encoding, nodes: loaded.nodes, images, pick: await pick(page) }
+    // PotreeConverter orders a node's points differently in each encoding, so only the picked
+    // point itself, not its index in the node, is the same.
+    const { index: _, ...picked } = (await pick(page))!
+    return { encoding: loaded.encoding, nodes: loaded.nodes, images, pick: picked }
   }
   const brotli = await draw(BROTLI)
   const uncompressed = await draw(DEFAULT)
   expect(brotli.encoding).toBe('BROTLI')
   expect(uncompressed.encoding).toBe('DEFAULT')
-  expect(brotli.pick).not.toBeNull()
   expect({ ...uncompressed, encoding: 'BROTLI' }).toEqual(brotli)
 })
 
