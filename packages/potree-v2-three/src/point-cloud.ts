@@ -268,6 +268,9 @@ export interface UpdateLimits {
   slots: LoadSlots;
 }
 
+/** PotreeV2PointCloud's private loader, for loadPotreeV2(). */
+let loadPointCloud: (metadataUrl: string | URL, options: PotreeV2Options) => Promise<PotreeV2PointCloud>;
+
 /**
  * Select, load and evict nodes of `clouds` under `limits`. `force` traverses even
  * when every cloud's view and settings are unchanged.
@@ -580,8 +583,7 @@ export class PotreeV2PointCloud {
     return this.loadWaiters.wait(options.signal);
   }
 
-  /** Resolves when metadata, the first hierarchy chunk and the root node are ready. */
-  static async load(metadataUrl: string | URL, options: PotreeV2Options = {}): Promise<PotreeV2PointCloud> {
+  private static async load(metadataUrl: string | URL, options: PotreeV2Options = {}): Promise<PotreeV2PointCloud> {
     const url = new URL(String(metadataUrl), globalThis.location?.href);
     const fetcher = options.fetch ?? fetch;
     const gate = RequestGate.for(url);
@@ -1065,6 +1067,7 @@ export class PotreeV2PointCloud {
   }
 
   static {
+    loadPointCloud = (metadataUrl, options) => PotreeV2PointCloud.load(metadataUrl, options);
     updatePointClouds = (clouds, camera, viewportHeight, limits, force) =>
       PotreeV2PointCloud.updateAll(clouds, camera, viewportHeight, limits, force);
     pickPointClouds = (clouds, renderer, camera, x, y, options) =>
@@ -1536,4 +1539,11 @@ function projectedRadius(
   return Infinity;
 }
 
-export const loadPotreeV2 = PotreeV2PointCloud.load;
+/**
+ * Load a Potree v2 point cloud from the URL of its metadata.json. Resolves when metadata, the
+ * first hierarchy chunk and the root node are ready; add `group` to a scene and the cloud to a
+ * PotreeV2PointCloudSet to display it.
+ */
+export function loadPotreeV2(metadataUrl: string | URL, options: PotreeV2Options = {}): Promise<PotreeV2PointCloud> {
+  return loadPointCloud(metadataUrl, options);
+}

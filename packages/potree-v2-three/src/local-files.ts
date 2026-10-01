@@ -1,5 +1,5 @@
-import { PotreeV2PointCloud } from './point-cloud.js';
-import type { PotreeV2Options } from './point-cloud.js';
+import { loadPotreeV2 } from './point-cloud.js';
+import type { PotreeV2Options, PotreeV2PointCloud } from './point-cloud.js';
 
 const requiredNames = ['metadata.json', 'hierarchy.bin', 'octree.bin'] as const;
 type RequiredName = typeof requiredNames[number];
@@ -64,7 +64,7 @@ export async function loadPotreeV2FromFiles(
       headers: { 'Content-Range': `bytes ${start}-${end}/${file.size}` },
     });
   };
-  return PotreeV2PointCloud.load(localBase, {
+  return loadPotreeV2(localBase, {
     ...options, fetch: localFetch, cacheEncodedNodes: options.cacheEncodedNodes ?? false,
   });
 }
