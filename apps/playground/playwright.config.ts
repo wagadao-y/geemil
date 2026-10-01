@@ -1,16 +1,17 @@
-import { defineConfig } from '@playwright/test'
+import { defineConfig } from '@playwright/test';
 
-const port = 5198
+const port = 5198;
 
 /**
  * Without these, Chromium's GPU process tries the host's display server (e.g. WSLg's
  * Wayland in a dev container) even with a headless Ozone platform, and WebGL fails.
  */
-const displayVariables = new Set(['WAYLAND_DISPLAY', 'DISPLAY'])
+const displayVariables = new Set(['WAYLAND_DISPLAY', 'DISPLAY']);
 const browserEnv = Object.fromEntries(
-  Object.entries(process.env).filter((entry): entry is [string, string] =>
-    entry[1] !== undefined && !displayVariables.has(entry[0])),
-)
+  Object.entries(process.env).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined && !displayVariables.has(entry[0]),
+  ),
+);
 
 export default defineConfig({
   testDir: 'e2e',
@@ -36,4 +37,4 @@ export default defineConfig({
     url: `http://localhost:${port}/e2e/harness.html`,
     reuseExistingServer: !process.env.CI,
   },
-})
+});

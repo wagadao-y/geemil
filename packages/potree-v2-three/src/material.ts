@@ -5,13 +5,24 @@ import { ClipUniforms, clipVertex, clipVertexPars } from './clipping.js';
 import type { ClipCapacity, NodeClip } from './clipping.js';
 import type { OctreeNode } from './format.js';
 import {
-  classificationDefines, classificationVertex, classificationVertexPars, colorTypeAttribute, createGradientTexture,
-  GRADIENT_SIZE, pointColorDefines, PotreeV2Classification, sampleGradient,
+  classificationDefines,
+  classificationVertex,
+  classificationVertexPars,
+  colorTypeAttribute,
+  createGradientTexture,
+  GRADIENT_SIZE,
+  pointColorDefines,
+  PotreeV2Classification,
+  sampleGradient,
 } from './point-color.js';
 import { PotreeV2Gradients } from './point-color.js';
 import type { PotreeV2Gradient, PotreeV2PointColorType } from './point-color.js';
 import { PointSizeUniforms, pointSizeDefines, pointSizeVertexPars } from './point-size.js';
-import type { PointSizeSettings, PotreeV2PointSizeType, VisibleNodesTexture } from './point-size.js';
+import type {
+  PointSizeSettings,
+  PotreeV2PointSizeType,
+  VisibleNodesTexture,
+} from './point-size.js';
 
 /** `square` fills the whole point sprite; `circle` discards its corners. */
 export type PotreeV2PointShape = 'square' | 'circle';
@@ -23,13 +34,13 @@ export function pointShapeDefines(shape: PotreeV2PointShape): Record<string, str
 }
 
 /** Discards fragments outside the point shape; the first statement of a point fragment shader. */
-export const pointShapeFragment = /* glsl */`
+export const pointShapeFragment = /* glsl */ `
 #ifdef POINT_SHAPE_CIRCLE
   vec2 pointCoord = 2.0 * gl_PointCoord - 1.0;
   if (dot(pointCoord, pointCoord) > 1.0) discard;
 #endif`;
 
-const vertexShader = /* glsl */`
+const vertexShader = /* glsl */ `
 #include <common>
 #include <fog_pars_vertex>
 #include <logdepthbuf_pars_vertex>
@@ -84,7 +95,7 @@ void main() {
   #include <fog_vertex>
 }`;
 
-const fragmentShader = /* glsl */`
+const fragmentShader = /* glsl */ `
 #include <common>
 #include <fog_pars_fragment>
 #include <logdepthbuf_pars_fragment>
@@ -131,7 +142,8 @@ export interface PotreeV2PointMaterialOptions {
 
 /** What the cloud gives its material besides the public settings. @internal */
 export interface PointMaterialContext {
-  spacing: number; visibleNodes: VisibleNodesTexture;
+  spacing: number;
+  visibleNodes: VisibleNodesTexture;
   /** Decoded attribute names; the color types that need a missing one cannot be selected. */
   attributes: readonly string[];
   /** metadata.json z of the cloud's local origin, the bounding box minimum. */
@@ -194,7 +206,8 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
     const ownClassification = options.classification ? undefined : new PotreeV2Classification();
     const classification = options.classification ?? ownClassification!;
     super({
-      vertexShader, fragmentShader,
+      vertexShader,
+      fragmentShader,
       uniforms: {
         ...UniformsUtils.merge([UniformsLib.fog]),
         diffuse: { value: new Color(options.color ?? 0xffffff) },
@@ -208,8 +221,11 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
         ...clip.uniforms,
       },
       defines: {
-        ...clip.defines, ...pointShapeDefines(shape), ...pointSizeDefines(sizeType),
-        ...pointColorDefines(options.colorType), ...classificationDefines(context.attributes.includes('classification')),
+        ...clip.defines,
+        ...pointShapeDefines(shape),
+        ...pointSizeDefines(sizeType),
+        ...pointColorDefines(options.colorType),
+        ...classificationDefines(context.attributes.includes('classification')),
       },
       fog: true,
     });
@@ -235,13 +251,17 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
   }
 
   /** Color of every point for `solid`, in Three.js' working color space. */
-  get color(): Color { return this.uniforms.diffuse!.value as Color; }
+  get color(): Color {
+    return this.uniforms.diffuse!.value as Color;
+  }
 
   /**
    * How points are colored; changing it recompiles the shader. `rgb`, `intensity` and
    * `classification` throw unless that attribute was decoded; see the `attributes` option.
    */
-  get colorType(): PotreeV2PointColorType { return this.pointColorType; }
+  get colorType(): PotreeV2PointColorType {
+    return this.pointColorType;
+  }
   set colorType(value: PotreeV2PointColorType) {
     if (value === this.pointColorType) return;
     assertColorType(value, this.attributes);
@@ -251,7 +271,9 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
   }
 
   /** Gradient of `elevation`, such as a PotreeV2Gradients entry. */
-  get gradient(): PotreeV2Gradient { return this.gradientStops; }
+  get gradient(): PotreeV2Gradient {
+    return this.gradientStops;
+  }
   set gradient(value: PotreeV2Gradient) {
     sampleGradient(value, this.gradientTexture.image.data as Uint8Array<ArrayBuffer>);
     this.gradientStops = value;
@@ -259,7 +281,9 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
   }
 
   /** Class colors and visibility; one scheme can be shared by several clouds. */
-  get classification(): PotreeV2Classification { return this.classificationScheme; }
+  get classification(): PotreeV2Classification {
+    return this.classificationScheme;
+  }
   set classification(value: PotreeV2Classification) {
     this.classificationScheme = value;
     this.uniforms.classificationStyles!.value = value.texture;
@@ -267,7 +291,9 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
   }
 
   /** Point shape; changing it recompiles the shader. */
-  get shape(): PotreeV2PointShape { return this.pointShape; }
+  get shape(): PotreeV2PointShape {
+    return this.pointShape;
+  }
   set shape(value: PotreeV2PointShape) {
     if (value === this.pointShape) return;
     this.pointShape = value;
@@ -276,7 +302,9 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
   }
 
   /** How `size` becomes pixels; changing it recompiles the shader. */
-  get sizeType(): PotreeV2PointSizeType { return this.pointSizeType; }
+  get sizeType(): PotreeV2PointSizeType {
+    return this.pointSizeType;
+  }
   set sizeType(value: PotreeV2PointSizeType) {
     if (value === this.pointSizeType) return;
     this.pointSizeType = value;
@@ -286,11 +314,18 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
 
   /** @internal */
   get sizeSettings(): PointSizeSettings {
-    return { type: this.pointSizeType, size: this.size, minSize: this.minSize, maxSize: this.maxSize };
+    return {
+      type: this.pointSizeType,
+      size: this.size,
+      minSize: this.minSize,
+      maxSize: this.maxSize,
+    };
   }
 
   /** @internal */
-  get clipCapacity(): ClipCapacity { return this.clip.capacity; }
+  get clipCapacity(): ClipCapacity {
+    return this.clip.capacity;
+  }
 
   /**
    * Recompile with room for `capacity` clips per node.
@@ -310,7 +345,8 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
     const clipChanged = this.clip.write(clip, origin);
     // The node uniforms are written for every size type, so a recompiled adaptive shader starts
     // with them, but only the adaptive shader reads them: other types upload nothing per node.
-    const nodeChanged = this.pointSize.writeNode(node, this.visibleNodes.index(node)) &&
+    const nodeChanged =
+      this.pointSize.writeNode(node, this.visibleNodes.index(node)) &&
       this.pointSizeType === 'adaptive';
     let elevationChanged = false;
     if (this.pointColorType === 'elevation') {
@@ -327,15 +363,26 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
 
   override onBeforeRender(renderer: WebGLRenderer): void {
     const viewportHeight = renderer.getCurrentViewport(this.viewport).w;
-    if (this.pointSize.write(
-      this.sizeSettings, renderer.getPixelRatio(), viewportHeight, this.spacing, this.visibleNodes.texture,
-    )) this.uniformsNeedUpdate = true;
+    if (
+      this.pointSize.write(
+        this.sizeSettings,
+        renderer.getPixelRatio(),
+        viewportHeight,
+        this.spacing,
+        this.visibleNodes.texture,
+      )
+    )
+      this.uniformsNeedUpdate = true;
     const u = this.uniforms;
     const [low, high] = this.elevationRange;
     const scale = high > low ? 1 / (high - low) : 0;
     const intensity = u.intensityRange!.value as Vector2;
-    if (u.elevationScale!.value !== scale || intensity.x !== this.intensityRange[0] ||
-      intensity.y !== this.intensityRange[1] || u.intensityGamma!.value !== this.intensityGamma) {
+    if (
+      u.elevationScale!.value !== scale ||
+      intensity.x !== this.intensityRange[0] ||
+      intensity.y !== this.intensityRange[1] ||
+      u.intensityGamma!.value !== this.intensityGamma
+    ) {
       u.elevationScale!.value = scale;
       intensity.set(this.intensityRange[0], this.intensityRange[1]);
       u.intensityGamma!.value = this.intensityGamma;
@@ -353,6 +400,8 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
 function assertColorType(type: PotreeV2PointColorType, attributes: readonly string[]): void {
   const attribute = colorTypeAttribute(type);
   if (attribute && !attributes.includes(attribute)) {
-    throw new Error(`Point color type '${type}' needs the decoded attribute '${attribute}'; add it to the attributes option`);
+    throw new Error(
+      `Point color type '${type}' needs the decoded attribute '${attribute}'; add it to the attributes option`,
+    );
   }
 }

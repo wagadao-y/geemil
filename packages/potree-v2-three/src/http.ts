@@ -11,7 +11,9 @@ export class HttpError extends Error {
   }
 
   /** The server asked clients to slow down (429 or 503); the request itself may succeed later. */
-  get throttled(): boolean { return this.status === 429 || this.status === 503; }
+  get throttled(): boolean {
+    return this.status === 429 || this.status === 503;
+  }
 }
 
 /** Parse Retry-After as delay-seconds or an HTTP date. */
@@ -27,7 +29,9 @@ export function parseRetryAfter(value: string | null, now = Date.now()): number 
 export async function responseError(url: URL, response: Response): Promise<HttpError> {
   await cancelBody(response.body);
   return new HttpError(
-    `GET ${url} failed: HTTP ${response.status}`, response.status, parseRetryAfter(response.headers.get('Retry-After')),
+    `GET ${url} failed: HTTP ${response.status}`,
+    response.status,
+    parseRetryAfter(response.headers.get('Retry-After')),
   );
 }
 
@@ -39,14 +43,19 @@ export async function responseError(url: URL, response: Response): Promise<HttpE
  * Content-Length, which may be missing (chunked) or describe compressed bytes.
  */
 export async function fetchRange(
-  url: URL, offset: bigint, size: bigint, fetcher: typeof fetch, signal?: AbortSignal,
+  url: URL,
+  offset: bigint,
+  size: bigint,
+  fetcher: typeof fetch,
+  signal?: AbortSignal,
 ): Promise<ArrayBuffer> {
   if (size === 0n) return new ArrayBuffer(0);
   if (offset < 0n || size < 0n) throw new Error('Negative Potree byte range');
   if (size > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('Potree byte range is too large');
   const end = offset + size - 1n;
   const response = await fetcher(url, {
-    headers: { Range: `bytes=${offset}-${end}` }, signal,
+    headers: { Range: `bytes=${offset}-${end}` },
+    signal,
   });
   const wholeFile = response.status === 200 && offset === 0n;
   if (response.status !== 206 && !wholeFile) {
@@ -80,17 +89,24 @@ async function cancelBody(body: ReadableStream<Uint8Array> | null): Promise<void
 }
 
 /** `wholeFile`: a 200 response to a range from offset 0, valid only when the file is exactly that range. */
-async function readExactly(response: Response, size: number, url: URL, wholeFile = false): Promise<ArrayBuffer> {
-  const tooLong = () => wholeFile
-    ? new HttpError(
-      `GET ${url}: expected HTTP 206 for byte range, got 200 with a longer body; the server must support Range requests`,
-      200,
-    )
-    : new Error(`GET ${url}: response is longer than the requested ${size} bytes`);
+async function readExactly(
+  response: Response,
+  size: number,
+  url: URL,
+  wholeFile = false,
+): Promise<ArrayBuffer> {
+  const tooLong = () =>
+    wholeFile
+      ? new HttpError(
+          `GET ${url}: expected HTTP 206 for byte range, got 200 with a longer body; the server must support Range requests`,
+          200,
+        )
+      : new Error(`GET ${url}: response is longer than the requested ${size} bytes`);
   if (!response.body) {
     const data = await response.arrayBuffer();
     if (data.byteLength > size) throw tooLong();
-    if (data.byteLength !== size) throw new Error(`GET ${url}: expected ${size} bytes, got ${data.byteLength}`);
+    if (data.byteLength !== size)
+      throw new Error(`GET ${url}: expected ${size} bytes, got ${data.byteLength}`);
     return data;
   }
   const output = new Uint8Array(size);
@@ -106,6 +122,7 @@ async function readExactly(response: Response, size: number, url: URL, wholeFile
     output.set(value, received);
     received += value.byteLength;
   }
-  if (received !== size) throw new Error(`GET ${url}: short byte range, got ${received} of ${size} bytes`);
+  if (received !== size)
+    throw new Error(`GET ${url}: short byte range, got ${received} of ${size} bytes`);
   return output.buffer;
 }

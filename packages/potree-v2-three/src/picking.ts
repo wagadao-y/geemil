@@ -1,13 +1,29 @@
 import {
-  BufferGeometry, Color, Frustum, GLSL3, Matrix4, NearestFilter, Points, RGBAIntegerFormat, Scene,
-  ShaderMaterial, UnsignedIntType, Vector2, Vector4, WebGLRenderTarget,
+  BufferGeometry,
+  Color,
+  Frustum,
+  GLSL3,
+  Matrix4,
+  NearestFilter,
+  Points,
+  RGBAIntegerFormat,
+  Scene,
+  ShaderMaterial,
+  UnsignedIntType,
+  Vector2,
+  Vector4,
+  WebGLRenderTarget,
 } from 'three';
 import type { Camera, OrthographicCamera, PerspectiveCamera, Texture, WebGLRenderer } from 'three';
 import type { OctreeNode } from './format.js';
 import { restoreViewport } from './viewport.js';
 import { ClipUniforms, clipVertex, clipVertexPars } from './clipping.js';
 import type { NodeClip } from './clipping.js';
-import { classificationDefines, classificationVertex, classificationVertexPars } from './point-color.js';
+import {
+  classificationDefines,
+  classificationVertex,
+  classificationVertexPars,
+} from './point-color.js';
 import { pointShapeDefines, pointShapeFragment } from './material.js';
 import type { PotreeV2PointMaterial, PotreeV2PointShape } from './material.js';
 import { PointSizeUniforms, pointSizeDefines, pointSizeVertexPars } from './point-size.js';
@@ -46,7 +62,7 @@ export interface PickHit<Owner> {
 
 // Log depth as the display shader writes it, so that the nearest point is the one drawn: a
 // standard depth buffer cannot tell apart points far from a camera with a small near plane.
-const vertexShader = /* glsl */`
+const vertexShader = /* glsl */ `
 #include <common>
 #include <logdepthbuf_pars_vertex>
 ${pointSizeVertexPars}
@@ -64,7 +80,7 @@ void main() {
   #include <logdepthbuf_vertex>
 }`;
 
-const fragmentShader = /* glsl */`
+const fragmentShader = /* glsl */ `
 #include <logdepthbuf_pars_fragment>
 uniform highp uint nodeId;
 flat in highp uint vIndex;
@@ -78,8 +94,10 @@ void main() {
 type PickCamera = PerspectiveCamera | OrthographicCamera;
 
 function isPickCamera(camera: Camera): camera is PickCamera {
-  return (camera as PerspectiveCamera).isPerspectiveCamera === true ||
-    (camera as OrthographicCamera).isOrthographicCamera === true;
+  return (
+    (camera as PerspectiveCamera).isPerspectiveCamera === true ||
+    (camera as OrthographicCamera).isOrthographicCamera === true
+  );
 }
 
 async function waitForSync(gl: WebGL2RenderingContext, sync: WebGLSync): Promise<boolean> {
@@ -88,7 +106,7 @@ async function waitForSync(gl: WebGL2RenderingContext, sync: WebGLSync): Promise
     const status = gl.clientWaitSync(sync, 0, 0);
     if (status === gl.WAIT_FAILED) return false;
     if (status === gl.ALREADY_SIGNALED || status === gl.CONDITION_SATISFIED) return true;
-    await new Promise(resolve => setTimeout(resolve, 4));
+    await new Promise((resolve) => setTimeout(resolve, 4));
   }
 }
 
@@ -98,13 +116,19 @@ class PickShader {
   readonly pointSize = new PointSizeUniforms();
   readonly material = new ShaderMaterial({
     glslVersion: GLSL3,
-    vertexShader, fragmentShader,
+    vertexShader,
+    fragmentShader,
     uniforms: {
-      nodeId: { value: 0 }, classificationStyles: { value: null as Texture | null },
-      ...this.pointSize.uniforms, ...this.clip.uniforms,
+      nodeId: { value: 0 },
+      classificationStyles: { value: null as Texture | null },
+      ...this.pointSize.uniforms,
+      ...this.clip.uniforms,
     },
     defines: {
-      ...this.clip.defines, ...pointShapeDefines('square'), ...pointSizeDefines('fixed'), ...classificationDefines(false),
+      ...this.clip.defines,
+      ...pointShapeDefines('square'),
+      ...pointSizeDefines('fixed'),
+      ...classificationDefines(false),
     },
   });
   private shape: PotreeV2PointShape = 'square';
@@ -139,10 +163,18 @@ class PickShader {
       this.material.needsUpdate = true;
     }
     this.material.uniforms.classificationStyles!.value = display.classification.texture;
-    this.pointSize.write(display.sizeSettings, pixelRatio, height, display.spacing, display.visibleNodes.texture);
+    this.pointSize.write(
+      display.sizeSettings,
+      pixelRatio,
+      height,
+      display.spacing,
+      display.visibleNodes.texture,
+    );
   }
 
-  dispose(): void { this.material.dispose(); }
+  dispose(): void {
+    this.material.dispose();
+  }
 }
 
 /** What one proxy draws in the current pick. */
@@ -158,9 +190,16 @@ type Drawn<Owner> = { layer: PickLayer<Owner>; target: PickTarget; shader: PickS
  */
 function orderAsDisplayed(drawn: readonly Drawn<unknown>[], proxies: readonly Points[]): void {
   // Every material has the id Three.js sorts by, but its type declarations omit it.
-  const keys = drawn.map(({ layer, target }) =>
-    [layer.groupOrder, target.points.renderOrder, (layer.display as unknown as { id: number }).id] as const);
-  const compare = (a: readonly number[], b: readonly number[]) => a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!;
+  const keys = drawn.map(
+    ({ layer, target }) =>
+      [
+        layer.groupOrder,
+        target.points.renderOrder,
+        (layer.display as unknown as { id: number }).id,
+      ] as const,
+  );
+  const compare = (a: readonly number[], b: readonly number[]) =>
+    a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!;
   const sorted = keys.map((_, index) => index).sort((a, b) => compare(keys[a]!, keys[b]!));
   let rank = -1;
   for (const [i, index] of sorted.entries()) {
@@ -183,8 +222,13 @@ export class PointPicker {
   // RGBA_INTEGER/UNSIGNED_INT is the read format WebGL2 guarantees for unsigned
   // integer attachments, so the readback does not depend on implementation formats.
   private readonly renderTarget = new WebGLRenderTarget(1, 1, {
-    format: RGBAIntegerFormat, type: UnsignedIntType, internalFormat: 'RGBA32UI',
-    minFilter: NearestFilter, magFilter: NearestFilter, generateMipmaps: false, depthBuffer: true,
+    format: RGBAIntegerFormat,
+    type: UnsignedIntType,
+    internalFormat: 'RGBA32UI',
+    minFilter: NearestFilter,
+    magFilter: NearestFilter,
+    generateMipmaps: false,
+    depthBuffer: true,
   });
   private readonly scene = new Scene();
   /** Reused stand-ins that draw node geometries with the ID materials; proxy i writes ID i + 1. */
@@ -232,10 +276,14 @@ export class PointPicker {
    * Uses the current viewport and the displayed Points' camera layers.
    */
   async pick<Owner>(
-    renderer: WebGLRenderer, camera: Camera, layers: readonly PickLayer<Owner>[],
-    x: number, y: number, radius: number,
+    renderer: WebGLRenderer,
+    camera: Camera,
+    layers: readonly PickLayer<Owner>[],
+    x: number,
+    y: number,
+    radius: number,
   ): Promise<PickHit<Owner> | null> {
-    if (!layers.some(layer => layer.targets.length > 0) || !isPickCamera(camera)) return null;
+    if (!layers.some((layer) => layer.targets.length > 0) || !isPickCamera(camera)) return null;
     const gl = renderer.getContext();
     if (!(gl instanceof WebGL2RenderingContext) || gl.isContextLost()) return null;
     const pixelRatio = renderer.getPixelRatio();
@@ -258,10 +306,12 @@ export class PointPicker {
     const cy = y * pixelRatio;
     const r = Math.max(0, radius) * pixelRatio;
     // Largest point drawn by any layer, in device pixels.
-    const size = Math.max(...layers.map(({ display }) => {
-      const settings = display.sizeSettings;
-      return (settings.type === 'fixed' ? settings.size : settings.maxSize) * pixelRatio;
-    }));
+    const size = Math.max(
+      ...layers.map(({ display }) => {
+        const settings = display.sizeSettings;
+        return (settings.type === 'fixed' ? settings.size : settings.maxSize) * pixelRatio;
+      }),
+    );
 
     // Pixels searched for hits, in device pixels from the top-left corner.
     const innerX0 = Math.max(left, Math.floor(cx - r));
@@ -281,16 +331,31 @@ export class PointPicker {
 
     // From the parents down, as update() does, so that a camera in a moved rig is current.
     camera.updateWorldMatrix(true, false);
-    const pickCamera = new (camera.constructor as new () => PickCamera)().copy(camera as never, false) as PickCamera;
+    const pickCamera = new (camera.constructor as new () => PickCamera)().copy(
+      camera as never,
+      false,
+    ) as PickCamera;
     // Keep the copied world matrices; recomputing them would drop a parent's transform.
     pickCamera.matrixWorldAutoUpdate = false;
     // Crop the existing projection to this region of the viewport. Keeping the original
     // projection also preserves its aspect, any camera view offset, and custom projections.
     const crop = new Matrix4().set(
-      vw / width, 0, 0, (vw - 2 * (x0 - vx) - width) / width,
-      0, vh / height, 0, (2 * (y0 - vy) + height - vh) / height,
-      0, 0, 1, 0,
-      0, 0, 0, 1,
+      vw / width,
+      0,
+      0,
+      (vw - 2 * (x0 - vx) - width) / width,
+      0,
+      vh / height,
+      0,
+      (2 * (y0 - vy) + height - vh) / height,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
     );
     pickCamera.projectionMatrix.premultiply(crop);
     pickCamera.projectionMatrixInverse.copy(pickCamera.projectionMatrix).invert();
@@ -299,7 +364,9 @@ export class PointPicker {
     const drawn: Drawn<Owner>[] = [];
     this.scene.clear();
     for (const layer of layers) {
-      this.projection.multiplyMatrices(pickCamera.projectionMatrix, pickCamera.matrixWorldInverse).multiply(layer.groupMatrix);
+      this.projection
+        .multiplyMatrices(pickCamera.projectionMatrix, pickCamera.matrixWorldInverse)
+        .multiply(layer.groupMatrix);
       this.frustum.setFromProjectionMatrix(this.projection);
       let shader: PickShader | undefined;
       // Three.js breaks ties of material and distance by object id. Proxies are created, and
@@ -307,8 +374,12 @@ export class PointPicker {
       // makes nodes of equal distance draw in the same order as displayed.
       const targets = [...layer.targets].sort((a, b) => a.points.id - b.points.id);
       for (const target of targets) {
-        if (!target.points.visible || !target.points.layers.test(camera.layers) ||
-          !this.frustum.intersectsBox(target.node.box)) continue;
+        if (
+          !target.points.visible ||
+          !target.points.layers.test(camera.layers) ||
+          !this.frustum.intersectsBox(target.node.box)
+        )
+          continue;
         if (!shader) {
           shader = this.shader(layer.display);
           shader.sync(layer.display, pixelRatio, height);

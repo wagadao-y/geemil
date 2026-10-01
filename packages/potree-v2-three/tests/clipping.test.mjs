@@ -7,7 +7,7 @@ import { ClipUniforms, clipNode, NO_CLIP, snapshotClipping } from '../dist/clipp
 async function waitFor(predicate) {
   for (let i = 0; i < 100; i++) {
     if (predicate()) return;
-    await new Promise(resolve => setTimeout(resolve, 5));
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
   assert.fail('Timed out waiting for background node load');
 }
@@ -25,7 +25,8 @@ function clippedByUniforms({ uniforms, capacity }, [x, y, z]) {
   if (capacity.planes > 0) {
     const planes = uniforms.potreeClipPlanes.value;
     for (let i = 0; i < uniforms.potreeClipPlaneCount.value; i++) {
-      if (planes[i * 4] * x + planes[i * 4 + 1] * y + planes[i * 4 + 2] * z + planes[i * 4 + 3] < 0) return true;
+      if (planes[i * 4] * x + planes[i * 4 + 1] * y + planes[i * 4 + 2] * z + planes[i * 4 + 3] < 0)
+        return true;
     }
   }
   if (capacity.boxes === 0) return false;
@@ -33,11 +34,11 @@ function clippedByUniforms({ uniforms, capacity }, [x, y, z]) {
   const keepCount = uniforms.potreeClipKeepCount.value;
   let kept = keepCount === 0;
   for (let i = 0; i < uniforms.potreeClipBoxCount.value; i++) {
-    const q = [0, 1, 2].map(row => {
+    const q = [0, 1, 2].map((row) => {
       const at = (i * 3 + row) * 4;
       return rows[at] * x + rows[at + 1] * y + rows[at + 2] * z + rows[at + 3];
     });
-    if (q.every(value => Math.abs(value) <= 0.5)) {
+    if (q.every((value) => Math.abs(value) <= 0.5)) {
       if (i >= keepCount) return true;
       kept = true;
     }
@@ -52,7 +53,9 @@ function snapshot(configure, group = new Matrix4()) {
 }
 
 test('a node inside a hide box is pruned, outside it is unclipped and across it keeps the box', () => {
-  const clip = snapshot(c => c.addBox({ matrix: boxMatrix([2, 2, 2], [4, 4, 4]), mode: 'hide-inside' }));
+  const clip = snapshot((c) =>
+    c.addBox({ matrix: boxMatrix([2, 2, 2], [4, 4, 4]), mode: 'hide-inside' }),
+  );
   assert.equal(clipNode(clip.root, box3([0.5, 0.5, 0.5], [3.5, 3.5, 3.5]), clip.keepPrune), null);
   assert.equal(clipNode(clip.root, box3([5, 5, 5], [8, 8, 8]), clip.keepPrune), NO_CLIP);
   const crossing = clipNode(clip.root, box3([3, 3, 3], [6, 6, 6]), clip.keepPrune);
@@ -64,29 +67,34 @@ test('a node inside a hide box is pruned, outside it is unclipped and across it 
 });
 
 test('keep boxes form a union: inside any skips the test, outside all prunes', () => {
-  const clip = snapshot(c => {
+  const clip = snapshot((c) => {
     c.addBox({ matrix: boxMatrix([2, 2, 2], [4, 4, 4]), mode: 'keep-inside' });
     c.addBox({ matrix: boxMatrix([6, 2, 2], [4, 4, 4]), mode: 'keep-inside' });
   });
-  assert.equal(clipNode(clip.root, box3([4.5, 0.5, 0.5], [7.5, 3.5, 3.5]), clip.keepPrune), NO_CLIP);
+  assert.equal(
+    clipNode(clip.root, box3([4.5, 0.5, 0.5], [7.5, 3.5, 3.5]), clip.keepPrune),
+    NO_CLIP,
+  );
   assert.equal(clipNode(clip.root, box3([0, 5, 0], [8, 8, 8]), clip.keepPrune), null);
   const crossing = clipNode(clip.root, box3([3, 0, 0], [5, 4, 4]), clip.keepPrune);
   assert.equal(crossing.keep.length, 2);
 });
 
 test('clips that do not prune hide a node without removing it from the traversal', () => {
-  const hide = snapshot(c => c.addBox({ matrix: boxMatrix([2, 2, 2], [4, 4, 4]), mode: 'hide-inside', prune: false }));
+  const hide = snapshot((c) =>
+    c.addBox({ matrix: boxMatrix([2, 2, 2], [4, 4, 4]), mode: 'hide-inside', prune: false }),
+  );
   const hidden = clipNode(hide.root, box3([1, 1, 1], [3, 3, 3]), hide.keepPrune);
   assert.equal(hidden.hidden, true);
   assert.equal(clipNode(hidden, box3([1, 1, 1], [2, 2, 2]), hide.keepPrune), hidden);
   // Outside every keep box prunes only when all keep boxes prune.
-  const keep = snapshot(c => {
+  const keep = snapshot((c) => {
     c.addBox({ matrix: boxMatrix([2, 2, 2], [4, 4, 4]), mode: 'keep-inside' });
     c.addBox({ matrix: boxMatrix([20, 2, 2], [4, 4, 4]), mode: 'keep-inside', prune: false });
   });
   assert.equal(clipNode(keep.root, box3([8, 8, 8], [9, 9, 9]), keep.keepPrune).hidden, true);
   // A pruning clip wins over one that only hides.
-  const both = snapshot(c => {
+  const both = snapshot((c) => {
     c.addBox({ matrix: boxMatrix([2, 2, 2], [4, 4, 4]), mode: 'hide-inside', prune: false });
     c.addPlane({ plane: new Plane(new Vector3(1, 0, 0), -5) });
   });
@@ -94,16 +102,24 @@ test('clips that do not prune hide a node without removing it from the traversal
 });
 
 test('planes keep the side their normal points to', () => {
-  const clip = snapshot(c => c.addPlane({ plane: new Plane(new Vector3(0, 0, 1), -4) }));
+  const clip = snapshot((c) => c.addPlane({ plane: new Plane(new Vector3(0, 0, 1), -4) }));
   assert.equal(clipNode(clip.root, box3([0, 0, 4], [8, 8, 8]), clip.keepPrune), NO_CLIP);
   assert.equal(clipNode(clip.root, box3([0, 0, 0], [8, 8, 3.9]), clip.keepPrune), null);
   assert.equal(clipNode(clip.root, box3([0, 0, 0], [8, 8, 8]), clip.keepPrune).planes.length, 1);
 });
 
 test('disabled clips are ignored and invalid clips are rejected', () => {
-  assert.equal(snapshot(c => c.addBox({ matrix: boxMatrix([0, 0, 0], [1, 1, 1]), mode: 'hide-inside', enabled: false })), undefined);
+  assert.equal(
+    snapshot((c) =>
+      c.addBox({ matrix: boxMatrix([0, 0, 0], [1, 1, 1]), mode: 'hide-inside', enabled: false }),
+    ),
+    undefined,
+  );
   const clipping = new PotreeV2Clipping();
-  assert.throws(() => clipping.addBox({ matrix: boxMatrix([0, 0, 0], [1, 0, 1]), mode: 'keep-inside' }), /invertible/);
+  assert.throws(
+    () => clipping.addBox({ matrix: boxMatrix([0, 0, 0], [1, 0, 1]), mode: 'keep-inside' }),
+    /invertible/,
+  );
   assert.throws(() => clipping.addPlane({ plane: new Plane(new Vector3(0, 0, 0), 1) }), /normal/);
   const box = clipping.addBox({ matrix: boxMatrix([0, 0, 0], [1, 1, 1]), mode: 'keep-inside' });
   box.matrix.makeScale(0, 1, 1);
@@ -116,12 +132,19 @@ test('shader uniforms apply keep, hide and plane clips in node-local float32 coo
   // Far from the origin, as a node of a large cloud would be.
   const far = 1_000_000;
   const rotation = new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), Math.PI / 6);
-  const clip = snapshot(c => {
-    c.addBox({ matrix: boxMatrix([far + 4, far + 4, far + 4], [6, 6, 6], rotation), mode: 'keep-inside' });
+  const clip = snapshot((c) => {
+    c.addBox({
+      matrix: boxMatrix([far + 4, far + 4, far + 4], [6, 6, 6], rotation),
+      mode: 'keep-inside',
+    });
     c.addBox({ matrix: boxMatrix([far + 4, far + 4, far + 4], [1, 1, 1]), mode: 'hide-inside' });
     c.addPlane({ plane: new Plane(new Vector3(0, 0, 1), -(far + 2)) });
   });
-  const node = clipNode(clip.root, box3([far, far, far], [far + 8, far + 8, far + 8]), clip.keepPrune);
+  const node = clipNode(
+    clip.root,
+    box3([far, far, far], [far + 8, far + 8, far + 8]),
+    clip.keepPrune,
+  );
   assert.equal(node.keep.length, 1);
   assert.equal(node.hide.length, 1);
   assert.equal(node.planes.length, 1);
@@ -142,7 +165,7 @@ test('shader uniforms apply keep, hide and plane clips in node-local float32 coo
 });
 
 test('clip arrays are uploaded only for nodes that test clips, while counts always are', () => {
-  const clip = snapshot(c => {
+  const clip = snapshot((c) => {
     c.addBox({ matrix: boxMatrix([4, 4, 4], [2, 2, 2]), mode: 'hide-inside' });
     c.addPlane({ plane: new Plane(new Vector3(0, 0, 1), -2) });
   });
@@ -152,7 +175,12 @@ test('clip arrays are uploaded only for nodes that test clips, while counts alwa
   assert.equal(planeOnly.planes.length, 1);
   const uniforms = new ClipUniforms();
   uniforms.resize({ boxes: 16, planes: 8 });
-  const { potreeClipBoxes: boxes, potreeClipPlanes: planes, potreeClipBoxCount, potreeClipPlaneCount } = uniforms.uniforms;
+  const {
+    potreeClipBoxes: boxes,
+    potreeClipPlanes: planes,
+    potreeClipBoxCount,
+    potreeClipPlaneCount,
+  } = uniforms.uniforms;
   const origin = new Vector3();
   uniforms.write(crossing, origin);
   assert.deepEqual([boxes.needsUpdate, planes.needsUpdate], [true, true]);
@@ -167,8 +195,12 @@ test('clip arrays are uploaded only for nodes that test clips, while counts alwa
 });
 
 const base = {
-  version: '2.0', encoding: 'DEFAULT', points: 4, spacing: 1,
-  scale: [0.5, 0.5, 0.5], offset: [100, 200, 300],
+  version: '2.0',
+  encoding: 'DEFAULT',
+  points: 4,
+  spacing: 1,
+  scale: [0.5, 0.5, 0.5],
+  offset: [100, 200, 300],
   boundingBox: { min: [100, 200, 300], max: [108, 208, 308] },
   hierarchy: { firstChunkSize: 88 },
   attributes: [
@@ -191,7 +223,10 @@ function record(type, mask, points, offset, size) {
 function concat(...arrays) {
   const data = new Uint8Array(arrays.reduce((n, a) => n + a.byteLength, 0));
   let at = 0;
-  for (const a of arrays) { data.set(a, at); at += a.byteLength; }
+  for (const a of arrays) {
+    data.set(a, at);
+    at += a.byteLength;
+  }
   return data;
 }
 
@@ -208,13 +243,17 @@ function uncompressedPoint(x, y, z) {
  */
 async function loadFixture(options = {}) {
   const hierarchy = concat(
-    record(1, 7, 1, 0, 18), record(0, 0, 1, 18, 18),
-    record(0, 0, 1, 36, 18), record(0, 0, 1, 54, 18),
+    record(1, 7, 1, 0, 18),
+    record(0, 0, 1, 18, 18),
+    record(0, 0, 1, 36, 18),
+    record(0, 0, 1, 54, 18),
   );
   // Integer positions are scaled by 0.5 and offset by (100, 200, 300).
   const octree = concat(
-    uncompressedPoint(8, 8, 8), uncompressedPoint(2, 2, 2),
-    uncompressedPoint(2, 2, 12), uncompressedPoint(2, 12, 2),
+    uncompressedPoint(8, 8, 8),
+    uncompressedPoint(2, 2, 2),
+    uncompressedPoint(2, 2, 12),
+    uncompressedPoint(2, 12, 2),
   );
   const fetcher = async (url, init = {}) => {
     const name = new URL(url).pathname.split('/').at(-1);
@@ -227,7 +266,9 @@ async function loadFixture(options = {}) {
     });
   };
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1, ...options,
+    fetch: fetcher,
+    minNodePixelSize: 1,
+    ...options,
   });
   const camera = new PerspectiveCamera(60, 1, 0.1, 100);
   camera.position.set(4, 4, 20);
@@ -243,19 +284,25 @@ function display(cloud) {
 }
 
 function shownNodes(cloud) {
-  return cloud.group.children.filter(child => child.isPoints && child.visible).map(child => child.name).sort();
+  return cloud.group.children
+    .filter((child) => child.isPoints && child.visible)
+    .map((child) => child.name)
+    .sort();
 }
 
 async function settle(set, camera) {
   await waitFor(() => {
     set.update(camera, 600);
-    return set.clouds.every(cloud => cloud.settled);
+    return set.clouds.every((cloud) => cloud.settled);
   });
 }
 
 test('a pruning hide box keeps its nodes out of the selection and the network', async () => {
   const clipping = new PotreeV2Clipping();
-  const box = clipping.addBox({ matrix: boxMatrix([2, 2, 2], [4.2, 4.2, 4.2]), mode: 'hide-inside' });
+  const box = clipping.addBox({
+    matrix: boxMatrix([2, 2, 2], [4.2, 4.2, 4.2]),
+    mode: 'hide-inside',
+  });
   const { cloud, camera } = await loadFixture({ clipping });
   const set = display(cloud);
   try {
@@ -269,7 +316,7 @@ test('a pruning hide box keeps its nodes out of the selection and the network', 
     await settle(set, camera);
     assert.equal(cloud.fetchStats.fetchedNodes, 4);
     assert.deepEqual(shownNodes(cloud), ['r', 'r1', 'r2']);
-    assert.equal(cloud.group.children.filter(child => child.isPoints).length, 4);
+    assert.equal(cloud.group.children.filter((child) => child.isPoints).length, 4);
 
     // Disabling the box is noticed without any notification from the application.
     box.enabled = false;
@@ -294,14 +341,14 @@ test('keep boxes and planes select only nodes that can show points, and compile 
     assert.match(cloud.material.vertexShader, /potreeClipped\(position\)/);
 
     // The root crosses the keep box, so its points are tested in the shader.
-    const root = cloud.group.children.find(child => child.name === 'r');
+    const root = cloud.group.children.find((child) => child.name === 'r');
     root.onBeforeRender();
     const { clip } = cloud.material;
     assert.equal(clip.uniforms.potreeClipKeepCount.value, 1);
     assert.equal(clippedByUniforms(clip, [2, 2, 6]), false);
     assert.equal(clippedByUniforms(clip, [4, 4, 4]), true);
     // r1 starts at z = 4, so the same box is converted into its node-local coordinates.
-    const r1 = cloud.group.children.find(child => child.name === 'r1');
+    const r1 = cloud.group.children.find((child) => child.name === 'r1');
     r1.onBeforeRender();
     assert.equal(clip.uniforms.potreeClipBoxCount.value, 1);
     assert.equal(clippedByUniforms(clip, [2, 2, 2]), false);
@@ -333,7 +380,10 @@ test('clouds sharing a clipping pick up its changes and grow the shader capacity
   try {
     // Seventeen hide boxes crossing the root exceed the initial capacity of 16.
     for (let i = 0; i < 17; i++) {
-      clipping.addBox({ matrix: boxMatrix([7.9, 7.9, 0.1 + i * 0.1], [0.05, 0.05, 0.05]), mode: 'hide-inside' });
+      clipping.addBox({
+        matrix: boxMatrix([7.9, 7.9, 0.1 + i * 0.1], [0.05, 0.05, 0.05]),
+        mode: 'hide-inside',
+      });
     }
     const set = display(a.cloud);
     set.add(b.cloud);
@@ -366,7 +416,8 @@ test('a traversal that throws leaves no candidates for the next one and is repea
   const set = new PotreeV2PointCloudSet({ pointBudget: 8 });
   set.add(a.cloud);
   set.add(b.cloud);
-  const required = () => a.cloud.loadDiagnostics.requiredNodes + b.cloud.loadDiagnostics.requiredNodes;
+  const required = () =>
+    a.cloud.loadDiagnostics.requiredNodes + b.cloud.loadDiagnostics.requiredNodes;
   try {
     await waitFor(() => {
       set.update(a.camera, 600);

@@ -1,5 +1,10 @@
 // Runs in the decoder Workers: keep this module free of Three.js imports (type imports are erased).
-import type { OctreeNode, PotreeV2Attribute, PotreeV2AttributeType, PotreeV2Metadata } from './format.js';
+import type {
+  OctreeNode,
+  PotreeV2Attribute,
+  PotreeV2AttributeType,
+  PotreeV2Metadata,
+} from './format.js';
 import { decompressBrotli } from './brotli-codecs.js';
 import { pointOccupancy } from './occupancy.js';
 import type { NodeExtent } from './occupancy.js';
@@ -7,25 +12,45 @@ import type { NodeExtent } from './occupancy.js';
 /** DataView reader for one element type, chosen once per attribute instead of per value. */
 function elementReader(view: DataView, type: PotreeV2AttributeType): (at: number) => number {
   switch (type) {
-    case 'int8': return at => view.getInt8(at);
-    case 'uint8': return at => view.getUint8(at);
-    case 'int16': return at => view.getInt16(at, true);
-    case 'uint16': return at => view.getUint16(at, true);
-    case 'int32': return at => view.getInt32(at, true);
-    case 'uint32': return at => view.getUint32(at, true);
-    case 'int64': return at => Number(view.getBigInt64(at, true));
-    case 'uint64': return at => Number(view.getBigUint64(at, true));
-    case 'float': return at => view.getFloat32(at, true);
-    case 'double': return at => view.getFloat64(at, true);
+    case 'int8':
+      return (at) => view.getInt8(at);
+    case 'uint8':
+      return (at) => view.getUint8(at);
+    case 'int16':
+      return (at) => view.getInt16(at, true);
+    case 'uint16':
+      return (at) => view.getUint16(at, true);
+    case 'int32':
+      return (at) => view.getInt32(at, true);
+    case 'uint32':
+      return (at) => view.getUint32(at, true);
+    case 'int64':
+      return (at) => Number(view.getBigInt64(at, true));
+    case 'uint64':
+      return (at) => Number(view.getBigUint64(at, true));
+    case 'float':
+      return (at) => view.getFloat32(at, true);
+    case 'double':
+      return (at) => view.getFloat64(at, true);
   }
 }
 
-type NumberArrayConstructor = new (buffer: ArrayBufferLike, byteOffset: number, length: number) => ArrayLike<number>;
+type NumberArrayConstructor = new (
+  buffer: ArrayBufferLike,
+  byteOffset: number,
+  length: number,
+) => ArrayLike<number>;
 
 /** Views for element types readable in place; 64-bit integers need BigInt conversion. */
 const typedArrays: Partial<Record<PotreeV2AttributeType, NumberArrayConstructor>> = {
-  int8: Int8Array, uint8: Uint8Array, int16: Int16Array, uint16: Uint16Array,
-  int32: Int32Array, uint32: Uint32Array, float: Float32Array, double: Float64Array,
+  int8: Int8Array,
+  uint8: Uint8Array,
+  int16: Int16Array,
+  uint16: Uint16Array,
+  int32: Int32Array,
+  uint32: Uint32Array,
+  float: Float32Array,
+  double: Float64Array,
 };
 
 /** Potree data is little-endian; typed array views use the platform's byte order. */
@@ -35,19 +60,30 @@ const littleEndian = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
  * 8- and 16-bit integers keep their type: WebGL reads them as float attributes without
  * normalization, in a half or a quarter of the memory.
  */
-const compactArrays: Partial<Record<PotreeV2AttributeType, new (length: number) => DecodedArray>> = {
-  int8: Int8Array, uint8: Uint8Array, int16: Int16Array, uint16: Uint16Array,
-};
+const compactArrays: Partial<Record<PotreeV2AttributeType, new (length: number) => DecodedArray>> =
+  {
+    int8: Int8Array,
+    uint8: Uint8Array,
+    int16: Int16Array,
+    uint16: Uint16Array,
+  };
 
 /**
  * How a 64-bit scalar attribute keeps useful precision in a GPU float: it is stored as
  * `(value - offset) / span`, from metadata.json's min and max. Undefined for other attributes,
  * which are stored as they are.
  */
-export function attributeNormalization(attribute: PotreeV2Attribute): { offset: number; span: number } | undefined {
+export function attributeNormalization(
+  attribute: PotreeV2Attribute,
+): { offset: number; span: number } | undefined {
   const min = attribute.min?.[0];
   const max = attribute.max?.[0];
-  if (attribute.elementSize !== 8 || attribute.numElements !== 1 || !Number.isFinite(min) || !Number.isFinite(max)) {
+  if (
+    attribute.elementSize !== 8 ||
+    attribute.numElements !== 1 ||
+    !Number.isFinite(min) ||
+    !Number.isFinite(max)
+  ) {
     return undefined;
   }
   return { offset: min!, span: max! - min! };
@@ -59,8 +95,12 @@ export function attributeNormalization(attribute: PotreeV2Attribute): { offset: 
  * `pointStride` the bytes between points.
  */
 function decodeGenericAttribute(
-  data: Uint8Array, view: DataView, attribute: PotreeV2Attribute, pointCount: number,
-  start: number, pointStride: number,
+  data: Uint8Array,
+  view: DataView,
+  attribute: PotreeV2Attribute,
+  pointCount: number,
+  start: number,
+  pointStride: number,
 ): DecodedArray {
   const { numElements, elementSize, type } = attribute;
   const count = pointCount * numElements;
@@ -118,7 +158,7 @@ for (let byte = 0; byte < 6; byte++) {
 function rgbShift(attribute: PotreeV2Attribute): number | undefined {
   const max = attribute.max;
   if (!max || max.length !== 3 || !max.every(Number.isFinite)) return undefined;
-  return max.some(value => value > 255) ? 8 : 0;
+  return max.some((value) => value > 255) ? 8 : 0;
 }
 
 function storageSize(attribute: PotreeV2Attribute, compressed: boolean): number {
@@ -154,7 +194,10 @@ export type NodeOrigin = readonly [number, number, number];
  * relative to `origin`, normally the node's box minimum, to keep float32 precision.
  */
 export async function decodeNodeData(
-  bytes: ArrayBuffer | Uint8Array, nodeName: string, pointCount: number, metadata: PotreeV2Metadata,
+  bytes: ArrayBuffer | Uint8Array,
+  nodeName: string,
+  pointCount: number,
+  metadata: PotreeV2Metadata,
   onTiming?: (timing: NodeDecodeTiming) => void,
   attributeNames: readonly string[] = DEFAULT_DECODED_ATTRIBUTES,
   origin: NodeOrigin = [0, 0, 0],
@@ -165,20 +208,35 @@ export async function decodeNodeData(
   if (compressed && pointCount > 0) {
     // Attributes are decoded straight from the decoder's memory, without copying its output.
     const expectedSize = pointCount * bytesPerPoint(metadata);
-    const decoded = await decompressBrotli(input, expectedSize,
-      data => decodeAttributes(data, nodeName, pointCount, metadata, attributeNames, origin));
-    onTiming?.({ setupMs: decoded.setupMs, brotliMs: decoded.brotliMs, attributesMs: decoded.consumeMs });
+    const decoded = await decompressBrotli(input, expectedSize, (data) =>
+      decodeAttributes(data, nodeName, pointCount, metadata, attributeNames, origin),
+    );
+    onTiming?.({
+      setupMs: decoded.setupMs,
+      brotliMs: decoded.brotliMs,
+      attributesMs: decoded.consumeMs,
+    });
     return decoded.result;
   }
   const startedAt = performance.now();
-  const attributes = decodeAttributes(input, nodeName, pointCount, metadata, attributeNames, origin);
+  const attributes = decodeAttributes(
+    input,
+    nodeName,
+    pointCount,
+    metadata,
+    attributeNames,
+    origin,
+  );
   onTiming?.({ setupMs: 0, brotliMs: 0, attributesMs: performance.now() - startedAt });
   return attributes;
 }
 
 /** One node of a batch request. */
 export interface BatchNodeRequest {
-  name: string; pointCount: number; offset: bigint; size: bigint;
+  name: string;
+  pointCount: number;
+  offset: bigint;
+  size: bigint;
   /** Origin of the decoded positions, normally the node's box minimum. Default: the cloud origin. */
   origin?: NodeOrigin;
   /** The node's box size; when given, the point occupancy for adaptive sizes is counted too. */
@@ -197,16 +255,25 @@ export interface DecodedBatchNode {
  * range in place. Used by the decoder Workers and by the main thread without Workers.
  */
 export async function decodeBatchNode(
-  bytes: ArrayBuffer, start: bigint, node: BatchNodeRequest, metadata: PotreeV2Metadata,
-  onTiming?: (timing: NodeDecodeTiming) => void, attributeNames?: readonly string[],
+  bytes: ArrayBuffer,
+  start: bigint,
+  node: BatchNodeRequest,
+  metadata: PotreeV2Metadata,
+  onTiming?: (timing: NodeDecodeTiming) => void,
+  attributeNames?: readonly string[],
 ): Promise<DecodedBatchNode> {
   const offset = node.offset - start;
   if (offset < 0n || node.size < 0n || offset + node.size > BigInt(bytes.byteLength)) {
     throw new Error(`Node ${node.name}: range outside batch`);
   }
   const attributes = await decodeNodeData(
-    new Uint8Array(bytes, Number(offset), Number(node.size)), node.name, node.pointCount, metadata, onTiming,
-    attributeNames, node.origin,
+    new Uint8Array(bytes, Number(offset), Number(node.size)),
+    node.name,
+    node.pointCount,
+    metadata,
+    onTiming,
+    attributeNames,
+    node.origin,
   );
   if (!node.extent) return { name: node.name, attributes };
   const startedAt = performance.now();
@@ -225,15 +292,21 @@ function bytesPerPoint(metadata: PotreeV2Metadata): number {
  * allocated, so `data` may be a view that is released afterwards.
  */
 function decodeAttributes(
-  data: Uint8Array, nodeName: string, pointCount: number, metadata: PotreeV2Metadata,
-  attributeNames: readonly string[], origin: NodeOrigin,
+  data: Uint8Array,
+  nodeName: string,
+  pointCount: number,
+  metadata: PotreeV2Metadata,
+  attributeNames: readonly string[],
+  origin: NodeOrigin,
 ): DecodedNodeData {
   const wanted = new Set(attributeNames);
   const compressed = metadata.encoding === 'BROTLI';
   const pointSize = bytesPerPoint(metadata);
   const expectedSize = pointCount * pointSize;
   if (data.byteLength !== expectedSize) {
-    throw new Error(`Node ${nodeName}: expected ${expectedSize} decoded bytes, got ${data.byteLength}`);
+    throw new Error(
+      `Node ${nodeName}: expected ${expectedSize} decoded bytes, got ${data.byteLength}`,
+    );
   }
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const attributes: DecodedNodeData = {};
@@ -258,13 +331,21 @@ function decodeAttributes(
         // Converter stores the high and low 48-bit Morton codes in that order.
         for (let i = 0; i < pointCount; i++) {
           const at = attributeOffset + i * size;
-          let hx = 0, hy = 0, hz = 0;
-          let lx = 0, ly = 0, lz = 0;
+          let hx = 0,
+            hy = 0,
+            hz = 0;
+          let lx = 0,
+            ly = 0,
+            lz = 0;
           for (let byte = 0; byte < 6; byte++) {
             const high = byte * 256 + data[at + byte]!;
             const low = byte * 256 + data[at + 8 + byte]!;
-            hx |= mortonX[high]!; hy |= mortonY[high]!; hz |= mortonZ[high]!;
-            lx |= mortonX[low]!; ly |= mortonY[low]!; lz |= mortonZ[low]!;
+            hx |= mortonX[high]!;
+            hy |= mortonY[high]!;
+            hz |= mortonZ[high]!;
+            lx |= mortonX[low]!;
+            ly |= mortonY[low]!;
+            lz |= mortonZ[low]!;
           }
           const output = i * 3;
           values[output] = ((hx << 16) | lx) * sx! + ox;
@@ -288,10 +369,14 @@ function decodeAttributes(
       if (compressed) {
         for (let i = 0; i < pointCount; i++) {
           const at = attributeOffset + i * size;
-          let r = 0, g = 0, b = 0;
+          let r = 0,
+            g = 0,
+            b = 0;
           for (let byte = 0; byte < 6; byte++) {
             const index = byte * 256 + data[at + byte]!;
-            r |= mortonX[index]!; g |= mortonY[index]!; b |= mortonZ[index]!;
+            r |= mortonX[index]!;
+            g |= mortonY[index]!;
+            b |= mortonZ[index]!;
           }
           const output = i * 4;
           if (shift === undefined) {
@@ -327,9 +412,18 @@ function decodeAttributes(
       attributes.color = { array: values, itemSize: 4, normalized: true };
     } else {
       const values = decodeGenericAttribute(
-        data, view, attribute, pointCount, attributeOffset, compressed ? size : stride,
+        data,
+        view,
+        attribute,
+        pointCount,
+        attributeOffset,
+        compressed ? size : stride,
       );
-      attributes[attribute.name] = { array: values, itemSize: attribute.numElements, normalized: false };
+      attributes[attribute.name] = {
+        array: values,
+        itemSize: attribute.numElements,
+        normalized: false,
+      };
     }
     attributeOffset += compressed ? size * pointCount : size;
   }

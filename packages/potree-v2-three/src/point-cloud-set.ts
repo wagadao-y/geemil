@@ -1,8 +1,19 @@
 import type { Camera, WebGLRenderer } from 'three';
 import { EncodedNodeCache } from './encoded-cache.js';
 import { LoadWaiters } from './load-waiters.js';
-import { cloudSets, LoadSlots, pickPointClouds, updatePointClouds, validViewportHeight } from './point-cloud.js';
-import type { PotreeV2PickOptions, PotreeV2PickResult, PotreeV2PointCloud, UpdateLimits } from './point-cloud.js';
+import {
+  cloudSets,
+  LoadSlots,
+  pickPointClouds,
+  updatePointClouds,
+  validViewportHeight,
+} from './point-cloud.js';
+import type {
+  PotreeV2PickOptions,
+  PotreeV2PickResult,
+  PotreeV2PointCloud,
+  UpdateLimits,
+} from './point-cloud.js';
 
 export interface PotreeV2PointCloudSetOptions {
   /** Maximum points selected for display per update, across all clouds. Default: 2,000,000. */
@@ -52,20 +63,30 @@ export class PotreeV2PointCloudSet {
   }
 
   /** Byte limit for encoded octree nodes across the clouds; setting 0 disables that cache. */
-  get encodedCacheByteBudget(): number { return this.encodedCache.maxBytes; }
+  get encodedCacheByteBudget(): number {
+    return this.encodedCache.maxBytes;
+  }
   set encodedCacheByteBudget(value: number) {
     this.encodedCache.maxBytes = value;
     this.encodedCache.trim();
   }
 
   /** Decoded point limit across clouds; follows pointBudget unless explicitly overridden. */
-  get cachePointBudget(): number { return this.cachePointBudgetOverride ?? this.pointBudget * 2; }
-  set cachePointBudget(value: number) { this.cachePointBudgetOverride = value; }
+  get cachePointBudget(): number {
+    return this.cachePointBudgetOverride ?? this.pointBudget * 2;
+  }
+  set cachePointBudget(value: number) {
+    this.cachePointBudgetOverride = value;
+  }
 
-  get clouds(): readonly PotreeV2PointCloud[] { return this.members; }
+  get clouds(): readonly PotreeV2PointCloud[] {
+    return this.members;
+  }
 
   /** True while any cloud of the set is `loading`; an empty set is not. */
-  get loading(): boolean { return this.members.some(cloud => cloud.loading); }
+  get loading(): boolean {
+    return this.members.some((cloud) => cloud.loading);
+  }
 
   /**
    * Resolves at the end of the next update() after which no cloud of the set is `loading`,
@@ -124,8 +145,10 @@ export class PotreeV2PointCloudSet {
   /** @internal */
   limits(): UpdateLimits {
     return {
-      pointBudget: this.pointBudget, cachePointBudget: this.cachePointBudget,
-      maxConcurrentLoads: this.maxConcurrentLoads, maxNodesToGPUPerFrame: this.maxNodesToGPUPerFrame,
+      pointBudget: this.pointBudget,
+      cachePointBudget: this.cachePointBudget,
+      maxConcurrentLoads: this.maxConcurrentLoads,
+      maxNodesToGPUPerFrame: this.maxNodesToGPUPerFrame,
       slots: this.slots,
     };
   }
@@ -137,7 +160,11 @@ export class PotreeV2PointCloudSet {
    * which. Otherwise as PotreeV2PointCloud.pick().
    */
   pick(
-    renderer: WebGLRenderer, camera: Camera, x: number, y: number, options: PotreeV2PickOptions = {},
+    renderer: WebGLRenderer,
+    camera: Camera,
+    x: number,
+    y: number,
+    options: PotreeV2PickOptions = {},
   ): Promise<PotreeV2PickResult | null> {
     return pickPointClouds(this.members, renderer, camera, x, y, options);
   }

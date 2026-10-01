@@ -14,7 +14,10 @@ function abortError(): Error {
 /** Resolve after `ms`, or reject with an AbortError once `signal` aborts. */
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (signal?.aborted) { reject(abortError()); return; }
+    if (signal?.aborted) {
+      reject(abortError());
+      return;
+    }
     const timer = setTimeout(() => {
       signal?.removeEventListener('abort', onAbort);
       resolve();
@@ -66,7 +69,9 @@ export class RequestGate {
   }
 
   /** Current adaptive limit, or Infinity while the origin has not throttled. */
-  get concurrencyLimit(): number { return this.limit; }
+  get concurrencyLimit(): number {
+    return this.limit;
+  }
 
   /**
    * Run one request, counting it against the limit and learning from its outcome.
@@ -145,8 +150,12 @@ export class RequestGate {
     // inFlight includes the throttled request itself.
     this.limit = Math.max(1, Math.floor(Math.min(this.limit, this.inFlight) / 2));
     this.successesAtLimit = 0;
-    this.backoffMs = Math.min(this.backoffMs > 0 ? this.backoffMs * 2 : Math.max(baseDelayMs, 1), MAX_BACKOFF_MS);
-    const delay = retryAfterMs !== undefined ? Math.min(retryAfterMs, MAX_RETRY_AFTER_MS) : this.backoffMs;
+    this.backoffMs = Math.min(
+      this.backoffMs > 0 ? this.backoffMs * 2 : Math.max(baseDelayMs, 1),
+      MAX_BACKOFF_MS,
+    );
+    const delay =
+      retryAfterMs !== undefined ? Math.min(retryAfterMs, MAX_RETRY_AFTER_MS) : this.backoffMs;
     this.resumeAt = now + delay;
   }
 }

@@ -50,7 +50,9 @@ export class DecoderPool {
   constructor(public maxWorkers: number) {}
 
   /** Its Workers failed, so every decode rejects; acquire() returns a new pool. */
-  get failed(): boolean { return this.workerFailure !== undefined; }
+  get failed(): boolean {
+    return this.workerFailure !== undefined;
+  }
 
   /** Jobs waiting for or running on a Worker. */
   get backlog(): number {
@@ -63,7 +65,9 @@ export class DecoderPool {
    * counting them would cap network concurrency at the Worker count. They join the
    * backlog as they arrive, so it holds at most twice the Workers plus the requests in flight.
    */
-  get full(): boolean { return this.backlog >= this.maxWorkers * 2; }
+  get full(): boolean {
+    return this.backlog >= this.maxWorkers * 2;
+  }
 
   /** Give back a pool from acquire(); the last release disposes it. */
   release(): void {
@@ -95,38 +99,71 @@ export class DecoderPool {
     }
   }
 
-  async decode(bytes: ArrayBuffer, nodeName: string, pointCount: number,
-    metadata: PotreeV2Metadata, attributeNames?: string[], origin?: NodeOrigin): Promise<DecodedNodeData> {
+  async decode(
+    bytes: ArrayBuffer,
+    nodeName: string,
+    pointCount: number,
+    metadata: PotreeV2Metadata,
+    attributeNames?: string[],
+    origin?: NodeOrigin,
+  ): Promise<DecodedNodeData> {
     if (this.disposed) return Promise.reject(abortError());
     if (this.workerFailure) return Promise.reject(this.workerFailure);
     if (typeof Worker === 'undefined') {
-      return decodeNodeData(bytes, nodeName, pointCount, metadata, undefined, attributeNames, origin);
+      return decodeNodeData(
+        bytes,
+        nodeName,
+        pointCount,
+        metadata,
+        undefined,
+        attributeNames,
+        origin,
+      );
     }
-    const result = await this.run({ id: ++this.nextId, bytes, nodeName, pointCount, origin, metadata, attributes: attributeNames });
+    const result = await this.run({
+      id: ++this.nextId,
+      bytes,
+      nodeName,
+      pointCount,
+      origin,
+      metadata,
+      attributes: attributeNames,
+    });
     if (!result.attributes) throw new Error(`Node ${nodeName}: empty decoder response`);
     return result.attributes;
   }
 
   /** `signal` withdraws the job while it still waits for a Worker; a running job completes. */
   async decodeBatch(
-    bytes: ArrayBuffer, start: bigint, nodes: BatchNodeRequest[], metadata: PotreeV2Metadata,
-    onTiming?: (timing: NodeDecodeTiming) => void, attributeNames?: string[], signal?: AbortSignal,
+    bytes: ArrayBuffer,
+    start: bigint,
+    nodes: BatchNodeRequest[],
+    metadata: PotreeV2Metadata,
+    onTiming?: (timing: NodeDecodeTiming) => void,
+    attributeNames?: string[],
+    signal?: AbortSignal,
   ): Promise<DecodedBatchNode[]> {
     if (this.disposed) throw abortError();
     if (typeof Worker === 'undefined') {
       const decoded = [];
-      for (const node of nodes) decoded.push(await decodeBatchNode(bytes, start, node, metadata, onTiming, attributeNames));
+      for (const node of nodes)
+        decoded.push(await decodeBatchNode(bytes, start, node, metadata, onTiming, attributeNames));
       return decoded;
     }
     const result = await this.run(
-      { id: ++this.nextId, bytes, start, nodes, metadata, attributes: attributeNames }, onTiming, signal,
+      { id: ++this.nextId, bytes, start, nodes, metadata, attributes: attributeNames },
+      onTiming,
+      signal,
     );
-    if (!result.nodes || result.nodes.length !== nodes.length) throw new Error('Incomplete batch decoder response');
+    if (!result.nodes || result.nodes.length !== nodes.length)
+      throw new Error('Incomplete batch decoder response');
     return result.nodes;
   }
 
   private run(
-    request: DecodeRequest, onTiming?: (timing: NodeDecodeTiming) => void, signal?: AbortSignal,
+    request: DecodeRequest,
+    onTiming?: (timing: NodeDecodeTiming) => void,
+    signal?: AbortSignal,
   ): Promise<DecodeResponse> {
     if (this.disposed || signal?.aborted) return Promise.reject(abortError());
     if (this.workerFailure) return Promise.reject(this.workerFailure);
@@ -176,7 +213,7 @@ export class DecoderPool {
       job.reject(new Error('Potree decoder response could not be deserialized'));
       this.pump();
     };
-    worker.onerror = event => {
+    worker.onerror = (event) => {
       event.preventDefault();
       this.failWorkers(new Error(`Potree decoder worker failed: ${event.message}`));
     };
@@ -186,7 +223,8 @@ export class DecoderPool {
 
   private pump(): void {
     while (!this.disposed && !this.workerFailure && this.queue.length > 0) {
-      const slot = this.workers.find(item => !item.job) ??
+      const slot =
+        this.workers.find((item) => !item.job) ??
         (this.workers.length < this.maxWorkers ? this.createWorker() : undefined);
       if (!slot) return;
       const job = this.queue.shift()!;
@@ -203,7 +241,10 @@ export class DecoderPool {
 
   private failWorkers(error: Error): void {
     this.workerFailure = error;
-    for (const job of this.queue.splice(0)) { job.cleanup?.(); job.reject(error); }
+    for (const job of this.queue.splice(0)) {
+      job.cleanup?.();
+      job.reject(error);
+    }
     for (const slot of this.workers) {
       slot.worker.terminate();
       slot.job?.reject(error);
@@ -216,7 +257,10 @@ export class DecoderPool {
     if (this.disposed) return;
     this.disposed = true;
     const error = abortError();
-    for (const job of this.queue.splice(0)) { job.cleanup?.(); job.reject(error); }
+    for (const job of this.queue.splice(0)) {
+      job.cleanup?.();
+      job.reject(error);
+    }
     for (const slot of this.workers) {
       slot.worker.terminate();
       slot.job?.reject(error);

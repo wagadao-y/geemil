@@ -23,7 +23,7 @@ export class LoadWaiters {
           signal?.removeEventListener('abort', onAbort);
           resolve();
         },
-        reject: reason => {
+        reject: (reason) => {
           signal?.removeEventListener('abort', onAbort);
           reject(reason);
         },

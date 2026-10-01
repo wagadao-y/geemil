@@ -37,7 +37,12 @@ const POTREE_LOD_BIAS = 0.5;
  * the root size / 128, including its truncated occupancy and half-level bias, so that the same
  * `size` looks the same as in Potree.
  */
-export function occupancyLevelOffset(occupancy: number, extent: NodeExtent, level: number, rootSpacing: number): number {
+export function occupancyLevelOffset(
+  occupancy: number,
+  extent: NodeExtent,
+  level: number,
+  rootSpacing: number,
+): number {
   if (occupancy === 0) return 0;
   const [sx, sy, sz] = extent;
   const pointSpacing = Math.cbrt(sx * sy * sz) / GRID / Math.sqrt(occupancy);
@@ -46,7 +51,12 @@ export function occupancyLevelOffset(occupancy: number, extent: NodeExtent, leve
 }
 
 /** occupancyLevelOffset() of a node's positions, relative to the minimum of `box`. */
-export function densityLevelOffset(positions: ArrayLike<number>, box: Box3, level: number, rootSpacing: number): number {
+export function densityLevelOffset(
+  positions: ArrayLike<number>,
+  box: Box3,
+  level: number,
+  rootSpacing: number,
+): number {
   const extent = nodeExtent(box);
   return occupancyLevelOffset(pointOccupancy(positions, extent), extent, level, rootSpacing);
 }
@@ -56,7 +66,7 @@ export function nodeExtent(box: Box3): NodeExtent {
   return [box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z];
 }
 
-export const pointSizeVertexPars = /* glsl */`
+export const pointSizeVertexPars = /* glsl */ `
 uniform float size;
 #if defined(POINT_SIZE_ATTENUATED) || defined(POINT_SIZE_ADAPTIVE)
 uniform float minPointSize;
@@ -126,12 +136,16 @@ export class VisibleNodesTexture {
   private readonly indices = new Map<OctreeNode, number>();
 
   /** Texture index of a node given to the last update(); 0 when absent. */
-  index(node: OctreeNode): number { return this.indices.get(node) ?? 0; }
+  index(node: OctreeNode): number {
+    return this.indices.get(node) ?? 0;
+  }
 
   /** `levelOffset` gives each node's densityLevelOffset(). */
   update(nodes: Iterable<OctreeNode>, levelOffset: (node: OctreeNode) => number): void {
     // Level order with siblings in child order, as Potree sorts node names.
-    const sorted = [...nodes].sort((a, b) => a.level - b.level || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    const sorted = [...nodes].sort(
+      (a, b) => a.level - b.level || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+    );
     const rows = Math.max(1, Math.ceil(sorted.length / TEXTURE_WIDTH));
     if (this.texture.image.height < rows) {
       this.texture.dispose();
@@ -155,11 +169,17 @@ export class VisibleNodesTexture {
     this.texture.needsUpdate = true;
   }
 
-  dispose(): void { this.texture.dispose(); }
+  dispose(): void {
+    this.texture.dispose();
+  }
 
   private static create(rows: number): DataTexture {
     const texture = new DataTexture(
-      new Uint32Array(TEXTURE_WIDTH * rows * 4), TEXTURE_WIDTH, rows, RGBAIntegerFormat, UnsignedIntType,
+      new Uint32Array(TEXTURE_WIDTH * rows * 4),
+      TEXTURE_WIDTH,
+      rows,
+      RGBAIntegerFormat,
+      UnsignedIntType,
     );
     texture.internalFormat = 'RGBA32UI';
     texture.minFilter = NearestFilter;
@@ -186,7 +206,10 @@ export class PointSizeUniforms {
 
   /** Write per-draw values; returns true when any uniform changed. */
   write(
-    settings: PointSizeSettings, pixelRatio: number, viewportHeight: number, spacing: number,
+    settings: PointSizeSettings,
+    pixelRatio: number,
+    viewportHeight: number,
+    spacing: number,
     visibleNodes: DataTexture,
   ): boolean {
     const u = this.uniforms;
@@ -194,8 +217,14 @@ export class PointSizeUniforms {
     const size = settings.type === 'fixed' ? settings.size * pixelRatio : settings.size;
     const minSize = settings.minSize * pixelRatio;
     const maxSize = settings.maxSize * pixelRatio;
-    if (u.size.value === size && u.minPointSize.value === minSize && u.maxPointSize.value === maxSize &&
-      u.viewportHeight.value === viewportHeight && u.pointSpacing.value === spacing && u.visibleNodes.value === visibleNodes) {
+    if (
+      u.size.value === size &&
+      u.minPointSize.value === minSize &&
+      u.maxPointSize.value === maxSize &&
+      u.viewportHeight.value === viewportHeight &&
+      u.pointSpacing.value === spacing &&
+      u.visibleNodes.value === visibleNodes
+    ) {
       return false;
     }
     u.size.value = size;
@@ -212,8 +241,13 @@ export class PointSizeUniforms {
     const u = this.uniforms;
     const { min, max } = node.box;
     const extent = u.nodeSize.value;
-    if (u.nodeIndex.value === index && u.nodeLevel.value === node.level &&
-      extent.x === max.x - min.x && extent.y === max.y - min.y && extent.z === max.z - min.z) {
+    if (
+      u.nodeIndex.value === index &&
+      u.nodeLevel.value === node.level &&
+      extent.x === max.x - min.x &&
+      extent.y === max.y - min.y &&
+      extent.z === max.z - min.z
+    ) {
       return false;
     }
     u.nodeIndex.value = index;

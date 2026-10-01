@@ -5,8 +5,17 @@
   font-synthesis: none;
 }
 
-* { box-sizing: border-box; }
-html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
 
 #viewport {
   position: fixed;
@@ -14,7 +23,11 @@ html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
   background: radial-gradient(circle at 50% 40%, #203143, #101923 55%, #090e15);
 }
 
-#viewport canvas { display: block; width: 100%; height: 100%; }
+#viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
 
 /* Ring centred on the picked point; its left/top corner is moved to the point by transform. */
 #pick-marker {
@@ -25,11 +38,15 @@ html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
   height: 18px;
   border: 2px solid #ffd166;
   border-radius: 50%;
-  box-shadow: 0 0 0 1px rgb(9 14 21 / 80%), inset 0 0 0 1px rgb(9 14 21 / 80%);
+  box-shadow:
+    0 0 0 1px rgb(9 14 21 / 80%),
+    inset 0 0 0 1px rgb(9 14 21 / 80%);
   pointer-events: none;
 }
 
-#pick-marker[hidden] { display: none; }
+#pick-marker[hidden] {
+  display: none;
+}
 
 #status {
   position: fixed;
@@ -47,7 +64,7 @@ html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
   pointer-events: none;
 }
 
-#status[data-error="true"] {
+#status[data-error='true'] {
   border-color: #693a40;
   background: rgb(55 29 33 / 92%);
   color: #ffb0ae;
@@ -71,9 +88,18 @@ html, body, #app { width: 100%; height: 100%; margin: 0; overflow: hidden; }
   --string-color: #cde7ee;
 }
 
-.lil-gui .lil-controller.lil-disabled { opacity: .72; }
+.lil-gui .lil-controller.lil-disabled {
+  opacity: 0.72;
+}
 
 @media (max-width: 600px) {
-  .lil-gui.lil-root.lil-auto-place { top: 8px; right: 8px; }
-  #status { left: 8px; bottom: 8px; max-width: calc(100vw - 16px); }
+  .lil-gui.lil-root.lil-auto-place {
+    top: 8px;
+    right: 8px;
+  }
+  #status {
+    left: 8px;
+    bottom: 8px;
+    max-width: calc(100vw - 16px);
+  }
 }

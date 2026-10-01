@@ -4,7 +4,12 @@
   "type": "module",
   "description": "Potree 2.0 point cloud loader and renderer for Three.js",
   "license": "Apache-2.0",
-  "files": ["dist", "README.md", "LICENSE", "THIRD_PARTY_LICENSES.txt"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_LICENSES.txt"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

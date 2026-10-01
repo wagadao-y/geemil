@@ -61,7 +61,11 @@ function assertBoxMatrix(matrix: Matrix4): void {
 
 function assertPlane(plane: Plane): void {
   const { normal, constant } = plane;
-  if (!Number.isFinite(constant) || !(normal.lengthSq() > 0) || !Number.isFinite(normal.lengthSq())) {
+  if (
+    !Number.isFinite(constant) ||
+    !(normal.lengthSq() > 0) ||
+    !Number.isFinite(normal.lengthSq())
+  ) {
     throw new Error('A clip plane needs a non-zero, finite normal and a finite constant');
   }
 }
@@ -76,8 +80,12 @@ export class PotreeV2Clipping {
   private readonly boxList: PotreeV2ClipBox[] = [];
   private readonly planeList: PotreeV2ClipPlane[] = [];
 
-  get boxes(): readonly PotreeV2ClipBox[] { return this.boxList; }
-  get planes(): readonly PotreeV2ClipPlane[] { return this.planeList; }
+  get boxes(): readonly PotreeV2ClipBox[] {
+    return this.boxList;
+  }
+  get planes(): readonly PotreeV2ClipPlane[] {
+    return this.planeList;
+  }
 
   addBox(options: PotreeV2ClipBoxOptions): PotreeV2ClipBox {
     assertBoxMatrix(options.matrix);
@@ -94,7 +102,8 @@ export class PotreeV2Clipping {
   }
 
   remove(clip: PotreeV2ClipBox | PotreeV2ClipPlane): boolean {
-    const list: (PotreeV2ClipBox | PotreeV2ClipPlane)[] = clip instanceof PotreeV2ClipBox ? this.boxList : this.planeList;
+    const list: (PotreeV2ClipBox | PotreeV2ClipPlane)[] =
+      clip instanceof PotreeV2ClipBox ? this.boxList : this.planeList;
     const index = list.indexOf(clip);
     if (index < 0) return false;
     list.splice(index, 1);
@@ -111,15 +120,31 @@ export class PotreeV2Clipping {
  * Append everything a clipping snapshot depends on, so an update can tell whether
  * any box, plane or the cloud's transform changed since the last traversal.
  */
-export function appendClippingKey(clipping: PotreeV2Clipping, groupMatrix: Matrix4, out: number[]): void {
+export function appendClippingKey(
+  clipping: PotreeV2Clipping,
+  groupMatrix: Matrix4,
+  out: number[],
+): void {
   out.push(...groupMatrix.elements);
   for (const box of clipping.boxes) {
-    out.push(box.enabled ? 1 : 0, box.mode === 'keep-inside' ? 1 : 0, box.prune ? 1 : 0, ...box.matrix.elements);
+    out.push(
+      box.enabled ? 1 : 0,
+      box.mode === 'keep-inside' ? 1 : 0,
+      box.prune ? 1 : 0,
+      ...box.matrix.elements,
+    );
   }
   // Separates boxes from planes, so moving a clip between the lists changes the key.
   out.push(NaN);
   for (const { plane, enabled, prune } of clipping.planes) {
-    out.push(enabled ? 1 : 0, prune ? 1 : 0, plane.normal.x, plane.normal.y, plane.normal.z, plane.constant);
+    out.push(
+      enabled ? 1 : 0,
+      prune ? 1 : 0,
+      plane.normal.x,
+      plane.normal.y,
+      plane.normal.z,
+      plane.constant,
+    );
   }
 }
 
@@ -129,10 +154,17 @@ export function sameKey(a: readonly number[], b: readonly number[]): boolean {
 }
 
 /** A plane in the cloud's local space; points with a negative distance are clipped. */
-export interface PlaneClip { plane: Plane; prune: boolean }
+export interface PlaneClip {
+  plane: Plane;
+  prune: boolean;
+}
 
 /** A box as the transform from the cloud's local space into its unit cube, with its local bounds. */
-export interface BoxClip { fromCloud: Matrix4; bounds: Box3; prune: boolean }
+export interface BoxClip {
+  fromCloud: Matrix4;
+  bounds: Box3;
+  prune: boolean;
+}
 
 /**
  * The clips a node's points still have to be tested against. Clips that keep or miss the
@@ -160,7 +192,10 @@ export interface ClipSnapshot {
 const UNIT_CUBE = new Box3(new Vector3(-0.5, -0.5, -0.5), new Vector3(0.5, 0.5, 0.5));
 
 /** Returns undefined when no clip is enabled. */
-export function snapshotClipping(clipping: PotreeV2Clipping, groupMatrix: Matrix4): ClipSnapshot | undefined {
+export function snapshotClipping(
+  clipping: PotreeV2Clipping,
+  groupMatrix: Matrix4,
+): ClipSnapshot | undefined {
   const toCloud = groupMatrix.clone().invert();
   const planes: PlaneClip[] = [];
   const keep: BoxClip[] = [];
@@ -191,7 +226,11 @@ export function snapshotClipping(clipping: PotreeV2Clipping, groupMatrix: Matrix
   return { root: { planes, keep: keep.length > 0 ? keep : null, hide, hidden: false }, keepPrune };
 }
 
-const enum Relation { Outside, Crossing, Inside }
+const enum Relation {
+  Outside,
+  Crossing,
+  Inside,
+}
 
 const corner = new Vector3();
 const localBounds = new Box3();
@@ -201,10 +240,15 @@ function boxRelation(clip: BoxClip, box: Box3): Relation {
   localBounds.makeEmpty();
   let inside = true;
   for (let i = 0; i < 8; i++) {
-    corner.set(
-      i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z,
-    ).applyMatrix4(clip.fromCloud);
-    if (Math.abs(corner.x) > 0.5 || Math.abs(corner.y) > 0.5 || Math.abs(corner.z) > 0.5) inside = false;
+    corner
+      .set(
+        i & 1 ? box.max.x : box.min.x,
+        i & 2 ? box.max.y : box.min.y,
+        i & 4 ? box.max.z : box.min.z,
+      )
+      .applyMatrix4(clip.fromCloud);
+    if (Math.abs(corner.x) > 0.5 || Math.abs(corner.y) > 0.5 || Math.abs(corner.z) > 0.5)
+      inside = false;
     localBounds.expandByPoint(corner);
   }
   if (inside) return Relation.Inside;
@@ -214,9 +258,12 @@ function boxRelation(clip: BoxClip, box: Box3): Relation {
 
 /** Inside: the whole box is kept. Outside: the whole box is clipped. */
 function planeRelation({ normal, constant }: Plane, box: Box3): Relation {
-  const cx = (box.min.x + box.max.x) / 2, ex = (box.max.x - box.min.x) / 2;
-  const cy = (box.min.y + box.max.y) / 2, ey = (box.max.y - box.min.y) / 2;
-  const cz = (box.min.z + box.max.z) / 2, ez = (box.max.z - box.min.z) / 2;
+  const cx = (box.min.x + box.max.x) / 2,
+    ex = (box.max.x - box.min.x) / 2;
+  const cy = (box.min.y + box.max.y) / 2,
+    ey = (box.max.y - box.min.y) / 2;
+  const cz = (box.min.z + box.max.z) / 2,
+    ez = (box.max.z - box.min.z) / 2;
   const distance = normal.x * cx + normal.y * cy + normal.z * cz + constant;
   const reach = Math.abs(normal.x) * ex + Math.abs(normal.y) * ey + Math.abs(normal.z) * ez;
   if (distance - reach >= 0) return Relation.Inside;
@@ -254,7 +301,10 @@ export function clipNode(parent: NodeClip, box: Box3, keepPrune: boolean): NodeC
     keep = [];
     for (const clip of parent.keep) {
       const relation = boxRelation(clip, box);
-      if (relation === Relation.Inside) { keep = null; break; }
+      if (relation === Relation.Inside) {
+        keep = null;
+        break;
+      }
       if (relation === Relation.Crossing) keep.push(clip);
     }
     if (keep?.length === 0) {
@@ -275,7 +325,7 @@ export function clipBoxCount(clip: NodeClip): number {
  * Vertex shader declarations shared by drawing and picking. POTREE_CLIP_BOXES and
  * POTREE_CLIP_PLANES are the per-node capacities; 0 compiles the test out.
  */
-export const clipVertexPars = /* glsl */`
+export const clipVertexPars = /* glsl */ `
 #if POTREE_CLIP_PLANES > 0
 uniform vec4 potreeClipPlanes[POTREE_CLIP_PLANES];
 uniform int potreeClipPlaneCount;
@@ -312,11 +362,14 @@ bool potreeClipped(vec3 p) {
 `;
 
 /** Moves a clipped point outside the clip volume after gl_Position is set, so it is not drawn. */
-export const clipVertex = /* glsl */`
+export const clipVertex = /* glsl */ `
 if (potreeClipped(position)) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 `;
 
-export interface ClipCapacity { boxes: number; planes: number }
+export interface ClipCapacity {
+  boxes: number;
+  planes: number;
+}
 
 type ClipUniformValues = {
   /** `needsUpdate: false` makes Three.js skip the upload; see ClipUniforms.write(). */
@@ -349,7 +402,8 @@ export class ClipUniforms {
 
   /** Returns true when the capacity changed and the shader has to be recompiled. */
   resize(capacity: ClipCapacity): boolean {
-    if (capacity.boxes === this.capacity.boxes && capacity.planes === this.capacity.planes) return false;
+    if (capacity.boxes === this.capacity.boxes && capacity.planes === this.capacity.planes)
+      return false;
     this.capacity.boxes = capacity.boxes;
     this.capacity.planes = capacity.planes;
     this.uniforms.potreeClipBoxes.value = new Float32Array(capacity.boxes * 12);
@@ -381,7 +435,8 @@ export class ClipUniforms {
       planes[i * 4] = normal.x;
       planes[i * 4 + 1] = normal.y;
       planes[i * 4 + 2] = normal.z;
-      planes[i * 4 + 3] = constant + normal.x * origin.x + normal.y * origin.y + normal.z * origin.z;
+      planes[i * 4 + 3] =
+        constant + normal.x * origin.x + normal.y * origin.y + normal.z * origin.z;
     }
     uniforms.potreeClipPlaneCount.value = planeCount;
     const boxes = uniforms.potreeClipBoxes.value;
@@ -396,7 +451,8 @@ export class ClipUniforms {
         boxes[at] = e[row]!;
         boxes[at + 1] = e[4 + row]!;
         boxes[at + 2] = e[8 + row]!;
-        boxes[at + 3] = e[row]! * origin.x + e[4 + row]! * origin.y + e[8 + row]! * origin.z + e[12 + row]!;
+        boxes[at + 3] =
+          e[row]! * origin.x + e[4 + row]! * origin.y + e[8 + row]! * origin.z + e[12 + row]!;
       }
     }
     uniforms.potreeClipKeepCount.value = Math.min(keep.length, boxCount);
@@ -410,7 +466,8 @@ export class ClipUniforms {
  * room for 16 boxes and 8 planes at once, so typical use compiles the clip test only once.
  */
 export function grownCapacity(current: ClipCapacity, needed: ClipCapacity): ClipCapacity {
-  const first = current.boxes === 0 && current.planes === 0 && (needed.boxes > 0 || needed.planes > 0);
+  const first =
+    current.boxes === 0 && current.planes === 0 && (needed.boxes > 0 || needed.planes > 0);
   const grow = (have: number, need: number, minimum: number) => {
     if (first) need = Math.max(need, minimum);
     if (need <= have) return have;
@@ -418,5 +475,8 @@ export function grownCapacity(current: ClipCapacity, needed: ClipCapacity): Clip
     while (next < need) next *= 2;
     return next;
   };
-  return { boxes: grow(current.boxes, needed.boxes, 16), planes: grow(current.planes, needed.planes, 8) };
+  return {
+    boxes: grow(current.boxes, needed.boxes, 16),
+    planes: grow(current.planes, needed.planes, 8),
+  };
 }

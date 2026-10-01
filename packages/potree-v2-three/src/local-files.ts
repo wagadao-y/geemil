@@ -2,7 +2,7 @@ import { loadPotreeV2 } from './point-cloud.js';
 import type { PotreeV2Options, PotreeV2PointCloud } from './point-cloud.js';
 
 const requiredNames = ['metadata.json', 'hierarchy.bin', 'octree.bin'] as const;
-type RequiredName = typeof requiredNames[number];
+type RequiredName = (typeof requiredNames)[number];
 
 /** Find one Potree v2 dataset among selected files. */
 export function selectPotreeV2Files(files: FileList | Iterable<File>): Record<RequiredName, File> {
@@ -20,12 +20,18 @@ export function selectPotreeV2Files(files: FileList | Iterable<File>): Record<Re
     }
     entries.set(name, file);
   }
-  const datasets = [...directories.values()].filter(entries => requiredNames.every(name => entries.has(name)));
+  const datasets = [...directories.values()].filter((entries) =>
+    requiredNames.every((name) => entries.has(name)),
+  );
   if (datasets.length === 0) {
-    throw new Error('Select metadata.json, hierarchy.bin and octree.bin of one Potree v2 dataset together');
+    throw new Error(
+      'Select metadata.json, hierarchy.bin and octree.bin of one Potree v2 dataset together',
+    );
   }
   if (datasets.length > 1) {
-    throw new Error('The selected files contain several Potree v2 datasets; select the three files of one dataset');
+    throw new Error(
+      'The selected files contain several Potree v2 datasets; select the three files of one dataset',
+    );
   }
   const entries = datasets[0]!;
   return {
@@ -37,7 +43,8 @@ export function selectPotreeV2Files(files: FileList | Iterable<File>): Record<Re
 
 /** Load selected local Potree v2 files without uploading them. */
 export async function loadPotreeV2FromFiles(
-  files: FileList | Iterable<File>, options: PotreeV2Options = {},
+  files: FileList | Iterable<File>,
+  options: PotreeV2Options = {},
 ): Promise<PotreeV2PointCloud> {
   const selected = selectPotreeV2Files(files);
   const localBase = new URL('https://potree-v2.local/metadata.json');
@@ -65,6 +72,8 @@ export async function loadPotreeV2FromFiles(
     });
   };
   return loadPotreeV2(localBase, {
-    ...options, fetch: localFetch, cacheEncodedNodes: options.cacheEncodedNodes ?? false,
+    ...options,
+    fetch: localFetch,
+    cacheEncodedNodes: options.cacheEncodedNodes ?? false,
   });
 }

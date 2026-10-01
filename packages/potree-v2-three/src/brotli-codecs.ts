@@ -20,7 +20,9 @@ function codecReady(): Promise<Codec> {
   if (!ready) {
     const pending = createCodec();
     ready = pending;
-    void pending.catch(() => { if (ready === pending) ready = undefined; });
+    void pending.catch(() => {
+      if (ready === pending) ready = undefined;
+    });
   }
   return ready;
 }
@@ -35,14 +37,16 @@ export async function initBrotli(): Promise<void> {
  * which is released when `consume` returns: copy anything that must outlive it.
  */
 export async function decompressBrotli<T>(
-  input: Uint8Array, expectedSize: number, consume: (data: Uint8Array) => T,
+  input: Uint8Array,
+  expectedSize: number,
+  consume: (data: Uint8Array) => T,
 ): Promise<{ result: T; setupMs: number; brotliMs: number; consumeMs: number }> {
   const setupStart = performance.now();
   const codec = await codecReady();
   const setupMs = performance.now() - setupStart;
   const decodeStart = performance.now();
   let consumeStart = decodeStart;
-  const result = codec.decode(input, expectedSize, data => {
+  const result = codec.decode(input, expectedSize, (data) => {
     consumeStart = performance.now();
     if (data.byteLength !== expectedSize) {
       throw new Error(`Brotli decoder returned ${data.byteLength} bytes, expected ${expectedSize}`);
@@ -50,7 +54,8 @@ export async function decompressBrotli<T>(
     return consume(data);
   });
   return {
-    result, setupMs,
+    result,
+    setupMs,
     brotliMs: consumeStart - decodeStart,
     consumeMs: performance.now() - consumeStart,
   };

@@ -1,4 +1,12 @@
-import { Color, DataTexture, LinearFilter, NearestFilter, RGBAFormat, SRGBColorSpace, UnsignedByteType } from 'three';
+import {
+  Color,
+  DataTexture,
+  LinearFilter,
+  NearestFilter,
+  RGBAFormat,
+  SRGBColorSpace,
+  UnsignedByteType,
+} from 'three';
 import type { ColorRepresentation } from 'three';
 
 /**
@@ -15,23 +23,54 @@ export type PotreeV2GradientName = 'SPECTRAL' | 'VIRIDIS' | 'INFERNO' | 'RAINBOW
 
 /** Frozen, so that no caller can change a default shared by every cloud. */
 function frozenGradient(stops: [number, string][]): PotreeV2Gradient {
-  return Object.freeze(stops.map(stop => Object.freeze(stop)));
+  return Object.freeze(stops.map((stop) => Object.freeze(stop)));
 }
 
 /** Gradients of Potree; SPECTRAL is its default for elevation. */
-export const PotreeV2Gradients: Readonly<Record<PotreeV2GradientName, PotreeV2Gradient>> = Object.freeze({
-  SPECTRAL: frozenGradient([
-    [0, '#5e4fa2'], [0.1, '#3288bd'], [0.2, '#66c2a5'], [0.3, '#abdda4'], [0.4, '#e6f598'], [0.5, '#ffffbf'],
-    [0.6, '#fee08b'], [0.7, '#fdae61'], [0.8, '#f46d43'], [0.9, '#d53e4f'], [1, '#9e0142'],
-  ]),
-  VIRIDIS: frozenGradient([[0, '#440154'], [0.25, '#3b528b'], [0.5, '#21918c'], [0.75, '#5ec962'], [1, '#fde725']]),
-  INFERNO: frozenGradient([[0, '#000004'], [0.2, '#420a68'], [0.4, '#932667'], [0.6, '#dd513a'], [0.8, '#fca50a'], [1, '#fcffa4']]),
-  RAINBOW: frozenGradient([
-    [0, '#4700b6'], [1 / 6, '#0000ff'], [2 / 6, '#00ffff'], [3 / 6, '#00ff00'], [4 / 6, '#ffff00'],
-    [5 / 6, '#ffa300'], [1, '#ff0000'],
-  ]),
-  GRAYSCALE: frozenGradient([[0, '#000000'], [1, '#ffffff']]),
-});
+export const PotreeV2Gradients: Readonly<Record<PotreeV2GradientName, PotreeV2Gradient>> =
+  Object.freeze({
+    SPECTRAL: frozenGradient([
+      [0, '#5e4fa2'],
+      [0.1, '#3288bd'],
+      [0.2, '#66c2a5'],
+      [0.3, '#abdda4'],
+      [0.4, '#e6f598'],
+      [0.5, '#ffffbf'],
+      [0.6, '#fee08b'],
+      [0.7, '#fdae61'],
+      [0.8, '#f46d43'],
+      [0.9, '#d53e4f'],
+      [1, '#9e0142'],
+    ]),
+    VIRIDIS: frozenGradient([
+      [0, '#440154'],
+      [0.25, '#3b528b'],
+      [0.5, '#21918c'],
+      [0.75, '#5ec962'],
+      [1, '#fde725'],
+    ]),
+    INFERNO: frozenGradient([
+      [0, '#000004'],
+      [0.2, '#420a68'],
+      [0.4, '#932667'],
+      [0.6, '#dd513a'],
+      [0.8, '#fca50a'],
+      [1, '#fcffa4'],
+    ]),
+    RAINBOW: frozenGradient([
+      [0, '#4700b6'],
+      [1 / 6, '#0000ff'],
+      [2 / 6, '#00ffff'],
+      [3 / 6, '#00ff00'],
+      [4 / 6, '#ffff00'],
+      [5 / 6, '#ffa300'],
+      [1, '#ff0000'],
+    ]),
+    GRAYSCALE: frozenGradient([
+      [0, '#000000'],
+      [1, '#ffffff'],
+    ]),
+  });
 
 /** The decoded attribute a color type reads; undefined when it needs none beyond position. */
 export function colorTypeAttribute(type: PotreeV2PointColorType): string | undefined {
@@ -61,12 +100,18 @@ function srgbBytes(color: ColorRepresentation): [number, number, number] {
 export const GRADIENT_SIZE = 256;
 
 /** Sample `gradient` into RGBA sRGB bytes, interpolating between stops in sRGB as a CSS gradient does. */
-export function sampleGradient(gradient: PotreeV2Gradient, out = new Uint8Array(GRADIENT_SIZE * 4)): Uint8Array {
+export function sampleGradient(
+  gradient: PotreeV2Gradient,
+  out = new Uint8Array(GRADIENT_SIZE * 4),
+): Uint8Array {
   if (gradient.length === 0) throw new Error('A gradient needs at least one stop');
-  const stops = gradient.map(([at, color]) => {
-    if (!Number.isFinite(at) || at < 0 || at > 1) throw new Error(`Gradient stop outside 0 to 1: ${at}`);
-    return { at, rgb: srgbBytes(color) };
-  }).sort((a, b) => a.at - b.at);
+  const stops = gradient
+    .map(([at, color]) => {
+      if (!Number.isFinite(at) || at < 0 || at > 1)
+        throw new Error(`Gradient stop outside 0 to 1: ${at}`);
+      return { at, rgb: srgbBytes(color) };
+    })
+    .sort((a, b) => a.at - b.at);
   const texels = out.length / 4;
   let next = 0;
   for (let i = 0; i < texels; i++) {
@@ -74,8 +119,10 @@ export function sampleGradient(gradient: PotreeV2Gradient, out = new Uint8Array(
     while (next < stops.length && stops[next]!.at <= t) next++;
     const before = stops[Math.max(0, next - 1)]!;
     const after = stops[Math.min(stops.length - 1, next)]!;
-    const f = after.at > before.at ? Math.min(1, Math.max(0, (t - before.at) / (after.at - before.at))) : 0;
-    for (let c = 0; c < 3; c++) out[i * 4 + c] = Math.round(before.rgb[c]! + (after.rgb[c]! - before.rgb[c]!) * f);
+    const f =
+      after.at > before.at ? Math.min(1, Math.max(0, (t - before.at) / (after.at - before.at))) : 0;
+    for (let c = 0; c < 3; c++)
+      out[i * 4 + c] = Math.round(before.rgb[c]! + (after.rgb[c]! - before.rgb[c]!) * f);
     out[i * 4 + 3] = 255;
   }
   return out;
@@ -83,7 +130,13 @@ export function sampleGradient(gradient: PotreeV2Gradient, out = new Uint8Array(
 
 /** One-row sRGB texture of a gradient, sampled with linear filtering. */
 export function createGradientTexture(gradient: PotreeV2Gradient): DataTexture {
-  const texture = new DataTexture(sampleGradient(gradient), GRADIENT_SIZE, 1, RGBAFormat, UnsignedByteType);
+  const texture = new DataTexture(
+    sampleGradient(gradient),
+    GRADIENT_SIZE,
+    1,
+    RGBAFormat,
+    UnsignedByteType,
+  );
   texture.colorSpace = SRGBColorSpace;
   texture.minFilter = LinearFilter;
   texture.magFilter = LinearFilter;
@@ -100,19 +153,20 @@ export interface PotreeV2ClassStyle {
 }
 
 /** Potree's default colors of the ASPRS LAS classes; other codes use PotreeV2UnlistedClassColor. Frozen. */
-export const PotreeV2DefaultClassColors: Readonly<Record<number, ColorRepresentation>> = Object.freeze({
-  0: '#808080', // never classified
-  1: '#808080', // unclassified
-  2: '#a1522e', // ground
-  3: '#00ff00', // low vegetation
-  4: '#00cc00', // medium vegetation
-  5: '#009900', // high vegetation
-  6: '#ffa800', // building
-  7: '#ff00ff', // low point (noise)
-  8: '#ff0000', // key point
-  9: '#0000ff', // water
-  12: '#ffff00', // overlap
-});
+export const PotreeV2DefaultClassColors: Readonly<Record<number, ColorRepresentation>> =
+  Object.freeze({
+    0: '#808080', // never classified
+    1: '#808080', // unclassified
+    2: '#a1522e', // ground
+    3: '#00ff00', // low vegetation
+    4: '#00cc00', // medium vegetation
+    5: '#009900', // high vegetation
+    6: '#ffa800', // building
+    7: '#ff00ff', // low point (noise)
+    8: '#ff0000', // key point
+    9: '#0000ff', // water
+    12: '#ffff00', // overlap
+  });
 /** Potree's color of the classification codes PotreeV2DefaultClassColors does not list. */
 export const PotreeV2UnlistedClassColor: ColorRepresentation = '#4d9999';
 
@@ -152,7 +206,10 @@ export class PotreeV2Classification {
   /** Restore Potree's default colors and show every class. */
   reset(): void {
     for (let code = 0; code < CLASS_COUNT; code++) {
-      this.data.set([...srgbBytes(PotreeV2DefaultClassColors[code] ?? PotreeV2UnlistedClassColor), 255], code * 4);
+      this.data.set(
+        [...srgbBytes(PotreeV2DefaultClassColors[code] ?? PotreeV2UnlistedClassColor), 255],
+        code * 4,
+      );
     }
     this.texture.needsUpdate = true;
   }
@@ -172,7 +229,12 @@ export class PotreeV2Classification {
   getColor(code: number, target = new Color()): Color {
     assertClassCode(code);
     const at = code * 4;
-    return target.setRGB(this.data[at]! / 255, this.data[at + 1]! / 255, this.data[at + 2]! / 255, SRGBColorSpace);
+    return target.setRGB(
+      this.data[at]! / 255,
+      this.data[at + 1]! / 255,
+      this.data[at + 2]! / 255,
+      SRGBColorSpace,
+    );
   }
 
   setVisible(code: number, visible: boolean): void {
@@ -186,14 +248,16 @@ export class PotreeV2Classification {
     return this.data[code * 4 + 3] !== 0;
   }
 
-  dispose(): void { this.texture.dispose(); }
+  dispose(): void {
+    this.texture.dispose();
+  }
 }
 
 /**
  * Vertex shader declarations shared by drawing and picking. POTREE_CLASSIFICATION is
  * defined when the geometry has a classification attribute.
  */
-export const classificationVertexPars = /* glsl */`
+export const classificationVertexPars = /* glsl */ `
 #ifdef POTREE_CLASSIFICATION
 attribute float classification;
 uniform sampler2D classificationStyles;
@@ -204,7 +268,7 @@ vec4 classificationStyle() {
 `;
 
 /** Moves a point of a hidden class outside the clip volume after gl_Position is set. */
-export const classificationVertex = /* glsl */`
+export const classificationVertex = /* glsl */ `
 #ifdef POTREE_CLASSIFICATION
 if (classificationStyle().a < 0.5) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
 #endif

@@ -117,7 +117,7 @@ if (clouds.update(camera, canvas.clientHeight)) renderer.render(scene, camera);
 `cloud.pick(renderer, camera, x, y)` は、キャンバス左上からの CSS ピクセル座標 `x`, `y` に描画されている点を返します（なければ `null`）。ほかの点群による隠れは考慮しないので、複数の点群を重ねて表示する場合は `PotreeV2PointCloudSet` の `pick()` を使ってください。対象は直前の `update()` で表示したノードのうち、カメラの `layers` と一致する可視の `Points` です。分割表示では、対象のビューを描画するときと同じ viewport・カメラで呼んでください。座標は viewport 内の相対座標ではなく、キャンバス左上からの座標です。レンダーターゲットに描画している場合は、そのレンダーターゲットを pixelRatio 倍のキャンバスとみなし、左上からのピクセル数を pixelRatio で割った座標で指定してください。`cloud.group` かその祖先が非表示なら `null` を返します。カーソル周辺だけをノード番号と点番号（`gl_VertexID`）の整数レンダーターゲットに描画し、GPU の完了を待たずに非同期で読み取るので、ピック用の頂点属性は持ちません。点のサイズと形は表示と同じなので、画面上で点が描かれているピクセルだけが当たります。`radius`（CSS px、初期値 0）を指定すると、その距離内で最も近い点を返します。属性値は CPU 側に保持している復号済みの配列から読みます。
 
 ```ts
-canvas.addEventListener('pointermove', async event => {
+canvas.addEventListener('pointermove', async (event) => {
   const hit = await cloud.pick(renderer, camera, event.offsetX, event.offsetY, { radius: 2 });
   if (hit) console.log(hit.node, hit.index, hit.sourcePosition, hit.attributes);
 });
@@ -171,7 +171,10 @@ const clipping = new PotreeV2Clipping();
 cloud.clipping = clipping; // or loadPotreeV2(url, { clipping })
 
 // A box is the unit cube from -0.5 to 0.5 transformed by `matrix`.
-const room = clipping.addBox({ matrix: new Matrix4().compose(center, rotation, size), mode: 'keep-inside' });
+const room = clipping.addBox({
+  matrix: new Matrix4().compose(center, rotation, size),
+  mode: 'keep-inside',
+});
 const wall = clipping.addBox({ matrix: wallMatrix, mode: 'hide-inside' });
 // Keeps the side the normal points to.
 const cut = clipping.addPlane({ plane: new Plane(new Vector3(0, 0, -1), 3) });
@@ -207,11 +210,11 @@ clipping.remove(cut);
 
 `material.sizeType` で、`size` から画面上の大きさを決める方法を選べます。
 
-| `sizeType` | `size` の意味 | 画面上の大きさ |
-|---|---|---|
-| `'fixed'`（既定） | CSS px | 常に `size` px |
-| `'attenuated'` | ルートの spacing に掛ける倍率 | ワールド空間で一定の大きさ。近いほど大きい |
-| `'adaptive'` | その位置で表示中の最も深いノードの spacing × 1.7 に掛ける倍率 | 細かいノードが表示されている所ほど小さく、粗い所ほど大きい |
+| `sizeType`        | `size` の意味                                                 | 画面上の大きさ                                             |
+| ----------------- | ------------------------------------------------------------- | ---------------------------------------------------------- |
+| `'fixed'`（既定） | CSS px                                                        | 常に `size` px                                             |
+| `'attenuated'`    | ルートの spacing に掛ける倍率                                 | ワールド空間で一定の大きさ。近いほど大きい                 |
+| `'adaptive'`      | その位置で表示中の最も深いノードの spacing × 1.7 に掛ける倍率 | 細かいノードが表示されている所ほど小さく、粗い所ほど大きい |
 
 `'attenuated'` と `'adaptive'` では、大きさを `material.minSize`〜`material.maxSize`（CSS px、既定は Potree と同じ 2〜50）に収めます。`size` は 1 前後が目安です。
 
@@ -221,13 +224,13 @@ clipping.remove(cut);
 
 `material.colorType` で、点の色の付け方を選べます。既定は `rgb` を復号していれば `'rgb'`、なければ `'elevation'` です。変えるとシェーダーをコンパイルし直しますが、読み込み済みのノードはそのまま使えます。
 
-| `colorType` | 使う属性 | 色 |
-|---|---|---|
-| `'rgb'` | `rgb` | 点の RGB |
-| `'solid'` | なし | `material.color`（既定は白） |
-| `'elevation'` | なし | metadata.json の z 座標を `material.elevationRange` の範囲で `material.gradient` に当てはめた色 |
-| `'intensity'` | `intensity` | `material.intensityRange` を黒〜白に対応させ、`material.intensityGamma` 乗した灰色 |
-| `'classification'` | `classification` | `material.classification` に登録したクラスごとの色 |
+| `colorType`        | 使う属性         | 色                                                                                              |
+| ------------------ | ---------------- | ----------------------------------------------------------------------------------------------- |
+| `'rgb'`            | `rgb`            | 点の RGB                                                                                        |
+| `'solid'`          | なし             | `material.color`（既定は白）                                                                    |
+| `'elevation'`      | なし             | metadata.json の z 座標を `material.elevationRange` の範囲で `material.gradient` に当てはめた色 |
+| `'intensity'`      | `intensity`      | `material.intensityRange` を黒〜白に対応させ、`material.intensityGamma` 乗した灰色              |
+| `'classification'` | `classification` | `material.classification` に登録したクラスごとの色                                              |
 
 復号する属性は読み込み時に決まり、使う属性を復号していない色の種類を指定するとエラーになります。読み込み時に `material.colorType` で指定した色の種類が使う属性は自動で復号しますが、読み込み後に `'intensity'` や `'classification'` へ切り替えるなら、`attributes` オプションにその属性を含めてください。
 

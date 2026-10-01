@@ -19,9 +19,9 @@ export function pointOccupancy(positions: ArrayLike<number>, extent: NodeExtent)
   occupiedCells.fill(0);
   let occupied = 0;
   for (let i = 0; i < positions.length; i += 3) {
-    const ix = Math.min(GRID - 1, Math.max(0, Math.floor(positions[i]! / sx * GRID)));
-    const iy = Math.min(GRID - 1, Math.max(0, Math.floor(positions[i + 1]! / sy * GRID)));
-    const iz = Math.min(GRID - 1, Math.max(0, Math.floor(positions[i + 2]! / sz * GRID)));
+    const ix = Math.min(GRID - 1, Math.max(0, Math.floor((positions[i]! / sx) * GRID)));
+    const iy = Math.min(GRID - 1, Math.max(0, Math.floor((positions[i + 1]! / sy) * GRID)));
+    const iz = Math.min(GRID - 1, Math.max(0, Math.floor((positions[i + 2]! / sz) * GRID)));
     const cell = ix + (iy + iz * GRID) * GRID;
     if (occupiedCells[cell] === 0) {
       occupiedCells[cell] = 1;

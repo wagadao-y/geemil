@@ -8,7 +8,12 @@ import { fetchRange, HttpError, parseRetryAfter } from '../dist/http.js';
 import { RequestGate } from '../dist/request-gate.js';
 import { EncodedNodeCache } from '../dist/encoded-cache.js';
 import { DecoderPool } from '../dist/decoder-pool.js';
-import { loadPotreeV2, loadPotreeV2FromFiles, PotreeV2PointCloudSet, selectPotreeV2Files } from '../dist/index.js';
+import {
+  loadPotreeV2,
+  loadPotreeV2FromFiles,
+  PotreeV2PointCloudSet,
+  selectPotreeV2Files,
+} from '../dist/index.js';
 import { Box3, Group, PerspectiveCamera, Vector3 } from 'three';
 
 /** Display `cloud` through a set of its own, as an application with one cloud does. */
@@ -21,15 +26,19 @@ function display(cloud, limits) {
 async function waitFor(predicate) {
   for (let i = 0; i < 100; i++) {
     if (predicate()) return;
-    await new Promise(resolve => setTimeout(resolve, 5));
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
   assert.fail('Timed out waiting for background node load');
 }
 
 // PotreeConverter writes DEFAULT for uncompressed output unless --encoding is given.
 const base = {
-  version: '2.0', encoding: 'DEFAULT', points: 2, spacing: 1,
-  scale: [0.5, 0.5, 0.5], offset: [100, 200, 300],
+  version: '2.0',
+  encoding: 'DEFAULT',
+  points: 2,
+  spacing: 1,
+  scale: [0.5, 0.5, 0.5],
+  offset: [100, 200, 300],
   boundingBox: { min: [100, 200, 300], max: [108, 208, 308] },
   hierarchy: { firstChunkSize: 44 },
   attributes: [
@@ -52,7 +61,10 @@ function record(type, mask, points, offset, size) {
 function concat(...arrays) {
   const data = new Uint8Array(arrays.reduce((n, a) => n + a.byteLength, 0));
   let at = 0;
-  for (const a of arrays) { data.set(a, at); at += a.byteLength; }
+  for (const a of arrays) {
+    data.set(a, at);
+    at += a.byteLength;
+  }
   return data;
 }
 
@@ -82,7 +94,10 @@ test('accepts the encodings PotreeConverter writes and rejects others', () => {
   for (const encoding of ['DEFAULT', 'BROTLI']) {
     assert.equal(validateMetadata({ ...base, encoding }).encoding, encoding);
   }
-  assert.throws(() => validateMetadata({ ...base, encoding: 'UNCOMPRESSED' }), /Unsupported Potree v2 encoding: UNCOMPRESSED/);
+  assert.throws(
+    () => validateMetadata({ ...base, encoding: 'UNCOMPRESSED' }),
+    /Unsupported Potree v2 encoding: UNCOMPRESSED/,
+  );
 });
 
 test('parses child boxes and proxy hierarchy chunks', () => {
@@ -134,7 +149,8 @@ test('rejects metadata whose numbers the octree cannot use', () => {
     [{ hierarchy: { firstChunkSize: 0 } }, /firstChunkSize/],
     [{ hierarchy: undefined }, /Incomplete/],
   ];
-  for (const [change, error] of invalid) assert.throws(() => validateMetadata({ ...base, ...change }), error);
+  for (const [change, error] of invalid)
+    assert.throws(() => validateMetadata({ ...base, ...change }), error);
   assert.equal(validateMetadata(base), base);
 });
 
@@ -149,7 +165,11 @@ test('decodes uncompressed positions and 16-bit colors', async () => {
 });
 
 test('decodes positions relative to the node minimum with matching bounds', async () => {
-  const node = { name: 'r0', numPoints: 1, box: new Box3(new Vector3(4, 6, 2), new Vector3(8, 8, 8)) };
+  const node = {
+    name: 'r0',
+    numPoints: 1,
+    box: new Box3(new Vector3(4, 6, 2), new Vector3(8, 8, 8)),
+  };
   // Cloud-local (5, 6, 7), i.e. (1, 0, 5) from the node minimum.
   const geometry = await decodeNode(uncompressedPoint(10, 12, 14, 0, 0, 0).buffer, node, base);
   assert.deepEqual([...geometry.getAttribute('position').array], [1, 0, 5]);
@@ -161,12 +181,22 @@ test('decodes positions relative to the node minimum with matching bounds', asyn
 
 test('node-relative positions keep millimetres far from the cloud origin', async () => {
   const metadata = {
-    ...base, scale: [0.001, 0.001, 0.001], offset: [500_000, 4_000_000, 0],
+    ...base,
+    scale: [0.001, 0.001, 0.001],
+    offset: [500_000, 4_000_000, 0],
     boundingBox: { min: [500_000, 4_000_000, 0], max: [532_768, 4_032_768, 32_768] },
   };
   // 20 km from the cloud minimum, where float32 steps are about 2 mm.
-  const node = { name: 'r7', numPoints: 1, box: new Box3(new Vector3(20_000, 20_000, 20_000), new Vector3(20_001, 20_001, 20_001)) };
-  const geometry = await decodeNode(uncompressedPoint(20_000_001, 20_000_002, 20_000_003, 0, 0, 0).buffer, node, metadata);
+  const node = {
+    name: 'r7',
+    numPoints: 1,
+    box: new Box3(new Vector3(20_000, 20_000, 20_000), new Vector3(20_001, 20_001, 20_001)),
+  };
+  const geometry = await decodeNode(
+    uncompressedPoint(20_000_001, 20_000_002, 20_000_003, 0, 0, 0).buffer,
+    node,
+    metadata,
+  );
   const [x, y, z] = geometry.getAttribute('position').array;
   assert.ok(Math.abs(x + 20_000 - 20_000.001) < 1e-6);
   assert.ok(Math.abs(y + 20_000 - 20_000.002) < 1e-6);
@@ -184,7 +214,11 @@ test('decodes Brotli Morton positions and colors', async () => {
   view.setBigUint64(8, morton(2, 4, 6, 16), true);
   view.setBigUint64(16, morton(100, 200, 300, 16), true);
   const compressed = brotliCompressSync(Buffer.from(raw));
-  const geometry = await decodeNode(compressed.buffer.slice(compressed.byteOffset, compressed.byteOffset + compressed.byteLength), node, metadata);
+  const geometry = await decodeNode(
+    compressed.buffer.slice(compressed.byteOffset, compressed.byteOffset + compressed.byteLength),
+    node,
+    metadata,
+  );
   assert.deepEqual([...geometry.getAttribute('position').array], [1, 2, 3]);
   assert.deepEqual([...geometry.getAttribute('color').array], [100, 200, 1, 255]);
   geometry.dispose();
@@ -194,9 +228,18 @@ test('rejects position and rgb attributes in types the decoders do not read', ()
   const [position, rgb] = base.attributes;
   const withAttributes = (...attributes) => ({ ...base, attributes });
   const invalid = [
-    [withAttributes({ ...position, type: 'uint32' }, rgb), /position attribute: expected 3 × int32, got 3 × uint32/],
-    [withAttributes({ ...position, type: 'double', size: 24, elementSize: 8 }, rgb), /position.*3 × double/],
-    [withAttributes(position, { ...rgb, type: 'uint8', size: 3, elementSize: 1 }), /rgb attribute: expected 3 × uint16, got 3 × uint8/],
+    [
+      withAttributes({ ...position, type: 'uint32' }, rgb),
+      /position attribute: expected 3 × int32, got 3 × uint32/,
+    ],
+    [
+      withAttributes({ ...position, type: 'double', size: 24, elementSize: 8 }, rgb),
+      /position.*3 × double/,
+    ],
+    [
+      withAttributes(position, { ...rgb, type: 'uint8', size: 3, elementSize: 1 }),
+      /rgb attribute: expected 3 × uint16, got 3 × uint8/,
+    ],
     [withAttributes(position, { ...rgb, size: 8, numElements: 4 }), /rgb.*4 × uint16/],
   ];
   for (const [metadata, error] of invalid) assert.throws(() => validateMetadata(metadata), error);
@@ -205,7 +248,7 @@ test('rejects position and rgb attributes in types the decoders do not read', ()
 });
 
 test('the metadata rgb maximum decides 8- or 16-bit colors for the whole dataset', async () => {
-  const withMax = max => ({
+  const withMax = (max) => ({
     ...base,
     attributes: [base.attributes[0], { ...base.attributes[1], min: [0, 0, 0], max }],
   });
@@ -218,7 +261,10 @@ test('the metadata rgb maximum decides 8- or 16-bit colors for the whole dataset
       const view = new DataView(raw);
       view.setBigUint64(16, morton(r, g, b, 16), true);
       const compressed = brotliCompressSync(Buffer.from(raw));
-      bytes = compressed.buffer.slice(compressed.byteOffset, compressed.byteOffset + compressed.byteLength);
+      bytes = compressed.buffer.slice(
+        compressed.byteOffset,
+        compressed.byteOffset + compressed.byteLength,
+      );
     } else {
       bytes = uncompressedPoint(0, 0, 0, r, g, b).buffer;
     }
@@ -229,9 +275,15 @@ test('the metadata rgb maximum decides 8- or 16-bit colors for the whole dataset
   };
   for (const encoding of ['DEFAULT', 'BROTLI']) {
     // 16-bit: dark values stay dark instead of being read as 8-bit.
-    assert.deepEqual(await decodeColor({ ...withMax([65280, 255, 300]), encoding }, 200, 255, 65535), [0, 0, 255, 255]);
+    assert.deepEqual(
+      await decodeColor({ ...withMax([65280, 255, 300]), encoding }, 200, 255, 65535),
+      [0, 0, 255, 255],
+    );
     // 8-bit values in the 16-bit fields are kept.
-    assert.deepEqual(await decodeColor({ ...withMax([255, 128, 0]), encoding }, 255, 128, 0), [255, 128, 0, 255]);
+    assert.deepEqual(
+      await decodeColor({ ...withMax([255, 128, 0]), encoding }, 255, 128, 0),
+      [255, 128, 0, 255],
+    );
   }
 });
 
@@ -242,12 +294,17 @@ test('decodes all 32 position bits and 16 color bits from Brotli Morton columns'
     [2_147_483_647, -2_147_483_648, 0x12345678],
     [-123_456_789, 42, 0xabcdef01 | 0],
   ];
-  const colors = [[0, 255, 256], [65_535, 1_024, 1], [300, 100, 255], [1, 2, 3]];
+  const colors = [
+    [0, 255, 256],
+    [65_535, 1_024, 1],
+    [300, 100, 255],
+    [1, 2, 3],
+  ];
   const raw = new ArrayBuffer(positions.length * 24);
   const view = new DataView(raw);
   for (let i = 0; i < positions.length; i++) {
-    const upper = positions[i].map(value => (value >>> 16) & 0xffff);
-    const lower = positions[i].map(value => value & 0xffff);
+    const upper = positions[i].map((value) => (value >>> 16) & 0xffff);
+    const lower = positions[i].map((value) => value & 0xffff);
     view.setBigUint64(i * 16, morton(...upper, 16), true);
     view.setBigUint64(i * 16 + 8, morton(...lower, 16), true);
     view.setBigUint64(positions.length * 16 + i * 8, morton(...colors[i], 16), true);
@@ -256,11 +313,16 @@ test('decodes all 32 position bits and 16 color bits from Brotli Morton columns'
   const node = createRoot(base);
   node.numPoints = positions.length;
   const metadata = {
-    ...base, encoding: 'BROTLI', scale: [1, 1, 1], offset: [0, 0, 0],
+    ...base,
+    encoding: 'BROTLI',
+    scale: [1, 1, 1],
+    offset: [0, 0, 0],
     boundingBox: { min: [0, 0, 0], max: [1, 1, 1] },
   };
   const geometry = await decodeNode(
-    compressed.buffer.slice(compressed.byteOffset, compressed.byteOffset + compressed.byteLength), node, metadata,
+    compressed.buffer.slice(compressed.byteOffset, compressed.byteOffset + compressed.byteLength),
+    node,
+    metadata,
   );
   assert.deepEqual(
     [...geometry.getAttribute('position').array],
@@ -268,7 +330,7 @@ test('decodes all 32 position bits and 16 color bits from Brotli Morton columns'
   );
   assert.deepEqual(
     [...geometry.getAttribute('color').array],
-    colors.flatMap(rgb => [...rgb.map(value => value > 255 ? value >>> 8 : value), 255]),
+    colors.flatMap((rgb) => [...rgb.map((value) => (value > 255 ? value >>> 8 : value)), 255]),
   );
   geometry.dispose();
 });
@@ -276,11 +338,18 @@ test('decodes all 32 position bits and 16 color bits from Brotli Morton columns'
 test('rejects full-file responses without reading their body', async () => {
   let cancelled = false;
   const body = new ReadableStream({
-    pull(controller) { controller.enqueue(new Uint8Array(1024)); },
-    cancel() { cancelled = true; },
+    pull(controller) {
+      controller.enqueue(new Uint8Array(1024));
+    },
+    cancel() {
+      cancelled = true;
+    },
   });
   const fetcher = async () => new Response(body, { status: 200 });
-  await assert.rejects(fetchRange(new URL('https://example.test/octree.bin'), 2n, 2n, fetcher), /expected HTTP 206/);
+  await assert.rejects(
+    fetchRange(new URL('https://example.test/octree.bin'), 2n, 2n, fetcher),
+    /expected HTTP 206/,
+  );
   assert.ok(cancelled);
 });
 
@@ -289,33 +358,68 @@ test('accepts a whole file answered with 200 when the range starts at 0 and cove
   const whole = async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 });
   assert.deepEqual([...new Uint8Array(await fetchRange(url, 0n, 3n, whole))], [1, 2, 3]);
   let cancelled = false;
-  const longer = async () => new Response(new ReadableStream({
-    pull(controller) { controller.enqueue(new Uint8Array(1024)); },
-    cancel() { cancelled = true; },
-  }), { status: 200 });
-  await assert.rejects(fetchRange(url, 0n, 3n, longer), { name: 'HttpError', status: 200, message: /expected HTTP 206/ });
+  const longer = async () =>
+    new Response(
+      new ReadableStream({
+        pull(controller) {
+          controller.enqueue(new Uint8Array(1024));
+        },
+        cancel() {
+          cancelled = true;
+        },
+      }),
+      { status: 200 },
+    );
+  await assert.rejects(fetchRange(url, 0n, 3n, longer), {
+    name: 'HttpError',
+    status: 200,
+    message: /expected HTTP 206/,
+  });
   assert.ok(cancelled);
 });
 
 /** A 206 response whose body arrives in chunks, without Content-Length. */
 function chunkedRange(chunks, headers = {}) {
-  return async () => new Response(new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(new Uint8Array(chunk));
-      controller.close();
-    },
-  }), { status: 206, headers });
+  return async () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          for (const chunk of chunks) controller.enqueue(new Uint8Array(chunk));
+          controller.close();
+        },
+      }),
+      { status: 206, headers },
+    );
 }
 
 test('reads chunked range responses without Content-Length', async () => {
-  const result = await fetchRange(new URL('https://example.test/octree.bin'), 2n, 5n, chunkedRange([[2, 3], [4], [5, 6]]));
+  const result = await fetchRange(
+    new URL('https://example.test/octree.bin'),
+    2n,
+    5n,
+    chunkedRange([[2, 3], [4], [5, 6]]),
+  );
   assert.deepEqual([...new Uint8Array(result)], [2, 3, 4, 5, 6]);
 });
 
 test('requires range responses of exactly the requested size', async () => {
   const url = new URL('https://example.test/octree.bin');
-  await assert.rejects(fetchRange(url, 2n, 3n, chunkedRange([[2, 3], [4, 5]])), /longer than the requested 3 bytes/);
-  await assert.rejects(fetchRange(url, 2n, 3n, chunkedRange([[2, 3]])), /short byte range, got 2 of 3 bytes/);
+  await assert.rejects(
+    fetchRange(
+      url,
+      2n,
+      3n,
+      chunkedRange([
+        [2, 3],
+        [4, 5],
+      ]),
+    ),
+    /longer than the requested 3 bytes/,
+  );
+  await assert.rejects(
+    fetchRange(url, 2n, 3n, chunkedRange([[2, 3]])),
+    /short byte range, got 2 of 3 bytes/,
+  );
   await assert.rejects(
     fetchRange(url, 2n, 3n, chunkedRange([[2, 3, 4]], { 'Content-Range': 'bytes 0-2/10' })),
     /unexpected Content-Range/,
@@ -324,7 +428,9 @@ test('requires range responses of exactly the requested size', async () => {
 
 test('encoded node cache evicts by bytes in least recently used order', () => {
   const cache = new EncodedNodeCache(5);
-  const a = { name: 'a' }, b = { name: 'b' }, c = { name: 'c' };
+  const a = { name: 'a' },
+    b = { name: 'b' },
+    c = { name: 'c' };
   cache.put(a, new ArrayBuffer(3));
   cache.put(b, new ArrayBuffer(2));
   assert.equal(cache.bytes, 5);
@@ -343,8 +449,15 @@ test('encoded node cache evicts by bytes in least recently used order', () => {
 
 test('loads metadata, hierarchy and root through HTTP ranges', async () => {
   const hierarchy = concat(record(1, 1, 1, 0, 18), record(0, 0, 1, 18, 18));
-  const octree = concat(uncompressedPoint(2, 4, 6, 255, 0, 0), uncompressedPoint(4, 6, 8, 0, 255, 0));
-  const files = { 'metadata.json': JSON.stringify(base), 'hierarchy.bin': hierarchy, 'octree.bin': octree };
+  const octree = concat(
+    uncompressedPoint(2, 4, 6, 255, 0, 0),
+    uncompressedPoint(4, 6, 8, 0, 255, 0),
+  );
+  const files = {
+    'metadata.json': JSON.stringify(base),
+    'hierarchy.bin': hierarchy,
+    'octree.bin': octree,
+  };
   const fetcher = async (url, init = {}) => {
     const name = new URL(url).pathname.split('/').at(-1);
     const file = files[name];
@@ -352,9 +465,15 @@ test('loads metadata, hierarchy and root through HTTP ranges', async () => {
     if (name === 'metadata.json') return new Response(file);
     const range = /bytes=(\d+)-(\d+)/.exec(init.headers.Range);
     const bytes = file.slice(Number(range[1]), Number(range[2]) + 1);
-    return new Response(bytes, { status: 206, headers: { 'Content-Range': `bytes ${range[1]}-${range[2]}/${file.byteLength}` } });
+    return new Response(bytes, {
+      status: 206,
+      headers: { 'Content-Range': `bytes ${range[1]}-${range[2]}/${file.byteLength}` },
+    });
   };
-  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, minNodePixelSize: 1 });
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher,
+    minNodePixelSize: 1,
+  });
   const set = display(cloud);
   assert.deepEqual(cloud.fetchStats, { rangeRequests: 1, fetchedNodes: 1 });
   assert.equal(set.maxNodesToGPUPerFrame, 8);
@@ -379,7 +498,10 @@ test('loads metadata, hierarchy and root through HTTP ranges', async () => {
   assert.deepEqual(cloud.fetchStats, { rangeRequests: 1, fetchedNodes: 1 });
   cloud.minNodePixelSize = 90;
   set.update(camera, 600);
-  await waitFor(() => { set.update(camera, 600); return cloud.group.children.length === 2; });
+  await waitFor(() => {
+    set.update(camera, 600);
+    return cloud.group.children.length === 2;
+  });
   assert.deepEqual(cloud.fetchStats, { rangeRequests: 2, fetchedNodes: 2 });
   const measured = cloud.loadDiagnostics;
   assert.equal(measured.requiredNodes, 2);
@@ -410,7 +532,7 @@ test('loads metadata, hierarchy and root through HTTP ranges', async () => {
   }
   cloud.showBoundingBoxes = true;
   set.update(camera, 600);
-  const boxes = cloud.group.children.filter(child => child.isLineSegments);
+  const boxes = cloud.group.children.filter((child) => child.isLineSegments);
   assert.equal(boxes.length, 2);
   assert.deepEqual(boxes[0].position.toArray(), [4, 4, 4]);
   assert.deepEqual(boxes[0].scale.toArray(), [8, 8, 8]);
@@ -418,10 +540,10 @@ test('loads metadata, hierarchy and root through HTTP ranges', async () => {
   assert.equal(boxes[0].material.depthTest, true);
   assert.equal(boxes[0].material.depthWrite, true);
   assert.equal(boxes[0].material.transparent, false);
-  assert.ok(boxes.every(box => box.visible));
+  assert.ok(boxes.every((box) => box.visible));
   cloud.showBoundingBoxes = false;
   set.update(camera, 600);
-  assert.ok(boxes.every(box => !box.visible));
+  assert.ok(boxes.every((box) => !box.visible));
   cloud.dispose();
   assert.equal(cloud.group.children.length, 0);
 });
@@ -429,8 +551,10 @@ test('loads metadata, hierarchy and root through HTTP ranges', async () => {
 test('cloud update groups adjacent children and installs visible nodes by priority', async () => {
   const metadata = { ...base, points: 4, hierarchy: { firstChunkSize: 88 } };
   const hierarchy = concat(
-    record(1, 7, 1, 0, 18), record(0, 0, 1, 18, 18),
-    record(0, 0, 1, 36, 18), record(0, 0, 1, 54, 18),
+    record(1, 7, 1, 0, 18),
+    record(0, 0, 1, 18, 18),
+    record(0, 0, 1, 36, 18),
+    record(0, 0, 1, 54, 18),
   );
   const octree = concat(
     uncompressedPoint(2, 4, 6, 255, 0, 0),
@@ -451,7 +575,8 @@ test('cloud update groups adjacent children and installs visible nodes by priori
     });
   };
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1,
+    fetch: fetcher,
+    minNodePixelSize: 1,
   });
   const set = display(cloud, { maxNodesToGPUPerFrame: 2 });
   try {
@@ -464,10 +589,14 @@ test('cloud update groups adjacent children and installs visible nodes by priori
     assert.equal(cloud.group.children.length, 1);
     // The last traversal's selection order decides which decoded nodes go first.
     cloud.selectionRank.clear();
-    [cloud.root, cloud.root.children[2], cloud.root.children[0], cloud.root.children[1]]
-      .forEach((node, index) => cloud.selectionRank.set(node, index));
+    [cloud.root, cloud.root.children[2], cloud.root.children[0], cloud.root.children[1]].forEach(
+      (node, index) => cloud.selectionRank.set(node, index),
+    );
     cloud.constructor.installDecodedNodes([cloud], set.maxNodesToGPUPerFrame);
-    assert.deepEqual(cloud.group.children.map(node => node.name), ['r', 'r2', 'r0']);
+    assert.deepEqual(
+      cloud.group.children.map((node) => node.name),
+      ['r', 'r2', 'r0'],
+    );
     set.update(camera, 600);
     assert.equal(cloud.group.children.length, 4);
     assert.deepEqual(ranges, ['bytes=0-17', 'bytes=18-71']);
@@ -479,7 +608,9 @@ test('cloud update groups adjacent children and installs visible nodes by priori
 test('starts the highest-priority Range batch even when its file offset is later', async () => {
   const metadata = { ...base, points: 3, hierarchy: { firstChunkSize: 66 } };
   const hierarchy = concat(
-    record(1, 3, 1, 0, 18), record(0, 0, 1, 18, 18), record(0, 0, 1, 70_000, 18),
+    record(1, 3, 1, 0, 18),
+    record(0, 0, 1, 18, 18),
+    record(0, 0, 1, 70_000, 18),
   );
   const octree = new Uint8Array(70_018);
   octree.set(uncompressedPoint(2, 4, 6, 255, 0, 0), 0);
@@ -502,7 +633,10 @@ test('starts the highest-priority Range batch even when its file offset is later
   });
   const set = display(cloud, { maxConcurrentLoads: 1 });
   try {
-    cloud.constructor.requestBatches([{ cloud, pending: [cloud.root.children[1], cloud.root.children[0]] }], set.limits());
+    cloud.constructor.requestBatches(
+      [{ cloud, pending: [cloud.root.children[1], cloud.root.children[0]] }],
+      set.limits(),
+    );
     await waitFor(() => cloud.fetchStats.rangeRequests === 2);
     assert.deepEqual(ranges, ['bytes=0-17', 'bytes=70000-70017']);
   } finally {
@@ -515,8 +649,11 @@ test('Brotli nodes are re-decoded from the encoded cache without another range r
   new DataView(raw).setBigUint64(8, morton(2, 4, 6, 16), true);
   const compressed = new Uint8Array(brotliCompressSync(Buffer.from(raw)));
   const metadata = {
-    ...base, encoding: 'BROTLI', points: 2,
-    attributes: [base.attributes[0]], hierarchy: { firstChunkSize: 44 },
+    ...base,
+    encoding: 'BROTLI',
+    points: 2,
+    attributes: [base.attributes[0]],
+    hierarchy: { firstChunkSize: 44 },
   };
   const hierarchy = concat(
     record(1, 1, 1, 0, compressed.length),
@@ -564,8 +701,11 @@ test('bytes that fail to decode are not cached, so a retry fetches them again', 
   new DataView(raw).setBigUint64(8, morton(2, 4, 6, 16), true);
   const compressed = new Uint8Array(brotliCompressSync(Buffer.from(raw)));
   const metadata = {
-    ...base, encoding: 'BROTLI', points: 2,
-    attributes: [base.attributes[0]], hierarchy: { firstChunkSize: 44 },
+    ...base,
+    encoding: 'BROTLI',
+    points: 2,
+    attributes: [base.attributes[0]],
+    hierarchy: { firstChunkSize: 44 },
   };
   const hierarchy = concat(
     record(1, 1, 1, 0, compressed.length),
@@ -609,13 +749,22 @@ test('a failed range fails only its own nodes and keeps the others of the load',
   const metadata = { ...base, points: 3, hierarchy: { firstChunkSize: 66 } };
   const files = {
     'metadata.json': JSON.stringify(metadata),
-    'hierarchy.bin': concat(record(1, 3, 1, 0, 18), record(0, 0, 1, 18, 18), record(0, 0, 1, 36, 18)),
+    'hierarchy.bin': concat(
+      record(1, 3, 1, 0, 18),
+      record(0, 0, 1, 18, 18),
+      record(0, 0, 1, 36, 18),
+    ),
     'octree.bin': concat(
-      uncompressedPoint(2, 4, 6, 255, 0, 0), uncompressedPoint(4, 6, 8, 0, 255, 0), uncompressedPoint(6, 6, 8, 0, 0, 255),
+      uncompressedPoint(2, 4, 6, 255, 0, 0),
+      uncompressedPoint(4, 6, 8, 0, 255, 0),
+      uncompressedPoint(6, 6, 8, 0, 0, 255),
     ),
   };
   const { fetcher } = flakyCloudFetcher(files, { 'octree.bin bytes=36-53': 1 });
-  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, cacheEncodedNodes: true });
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher,
+    cacheEncodedNodes: true,
+  });
   display(cloud, { encodedCacheByteBudget: 1024 });
   try {
     const [first, second] = cloud.root.children.filter(Boolean);
@@ -626,7 +775,10 @@ test('a failed range fails only its own nodes and keeps the others of the load',
     assert.equal(failures.length, 1);
     assert.deepEqual(failures[0].nodes, [second]);
     assert.equal(failures[0].error.status, 500);
-    assert.deepEqual(cloud.decodedQueue.map(item => item.node), [first]);
+    assert.deepEqual(
+      cloud.decodedQueue.map((item) => item.node),
+      [first],
+    );
     // Decoding counted the occupancy that installation turns into the adaptive size offset.
     assert.equal(cloud.decodedQueue[0].occupancy, 1);
   } finally {
@@ -637,7 +789,10 @@ test('a failed range fails only its own nodes and keeps the others of the load',
 test('a perspective camera zoom refines the nodes it magnifies', async () => {
   const { fetcher } = flakyCloudFetcher(childFiles, {});
   // The child projects to about 99 px at zoom 1 and 198 px at zoom 2.
-  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, minNodePixelSize: 150 });
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher,
+    minNodePixelSize: 150,
+  });
   const set = display(cloud);
   try {
     const camera = childViewCamera();
@@ -645,7 +800,10 @@ test('a perspective camera zoom refines the nodes it magnifies', async () => {
     assert.equal(cloud.loadDiagnostics.requiredNodes, 1);
     camera.zoom = 2;
     camera.updateProjectionMatrix();
-    await waitFor(() => { set.update(camera, 600); return cloud.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return cloud.group.children.length === 2;
+    });
     assert.equal(cloud.loadDiagnostics.requiredNodes, 2);
   } finally {
     cloud.dispose();
@@ -654,10 +812,16 @@ test('a perspective camera zoom refines the nodes it magnifies', async () => {
 
 test('loads a selected local folder using slices of the binary files', async () => {
   const hierarchy = concat(record(1, 1, 1, 0, 18), record(0, 0, 1, 18, 18));
-  const octree = concat(uncompressedPoint(2, 4, 6, 255, 0, 0), uncompressedPoint(4, 6, 8, 0, 255, 0));
+  const octree = concat(
+    uncompressedPoint(2, 4, 6, 255, 0, 0),
+    uncompressedPoint(4, 6, 8, 0, 255, 0),
+  );
   const reads = [];
   class TrackedFile extends File {
-    slice(start, end) { reads.push([this.name, start, end]); return super.slice(start, end); }
+    slice(start, end) {
+      reads.push([this.name, start, end]);
+      return super.slice(start, end);
+    }
   }
   const files = [
     new TrackedFile([JSON.stringify(base)], 'metadata.json'),
@@ -671,26 +835,37 @@ test('loads a selected local folder using slices of the binary files', async () 
   const cloud = await loadPotreeV2FromFiles(files, { minNodePixelSize: 1 });
   const set = display(cloud);
   assert.equal(cloud.cacheEncodedNodes, false);
-  assert.deepEqual(reads, [['hierarchy.bin', 0, 44], ['octree.bin', 0, 18]]);
+  assert.deepEqual(reads, [
+    ['hierarchy.bin', 0, 44],
+    ['octree.bin', 0, 18],
+  ]);
   assert.equal(cloud.group.children.length, 1);
   const camera = new PerspectiveCamera(60, 1, 0.1, 100);
   camera.position.set(4, 4, 20);
   camera.lookAt(4, 4, 4);
   set.update(camera, 600);
-  await waitFor(() => { set.update(camera, 600); return cloud.group.children.length === 2; });
+  await waitFor(() => {
+    set.update(camera, 600);
+    return cloud.group.children.length === 2;
+  });
   assert.deepEqual(reads.at(-1), ['octree.bin', 18, 36]);
   assert.equal(cloud.group.children.length, 2);
   cloud.dispose();
 });
 
 test('requires exactly one complete local dataset', () => {
-  assert.throws(() => selectPotreeV2Files([new File(['{}'], 'metadata.json')]), /Select metadata\.json, hierarchy\.bin and octree\.bin/);
+  assert.throws(
+    () => selectPotreeV2Files([new File(['{}'], 'metadata.json')]),
+    /Select metadata\.json, hierarchy\.bin and octree\.bin/,
+  );
   const names = ['metadata.json', 'hierarchy.bin', 'octree.bin'];
-  const files = ['first', 'second'].flatMap(dir => names.map(name => {
-    const file = new File([''], name);
-    Object.defineProperty(file, 'webkitRelativePath', { value: `${dir}/${name}` });
-    return file;
-  }));
+  const files = ['first', 'second'].flatMap((dir) =>
+    names.map((name) => {
+      const file = new File([''], name);
+      Object.defineProperty(file, 'webkitRelativePath', { value: `${dir}/${name}` });
+      return file;
+    }),
+  );
   assert.throws(() => selectPotreeV2Files(files), /several Potree v2 datasets/);
 });
 
@@ -726,22 +901,33 @@ function childViewCamera() {
 const childFiles = {
   'metadata.json': JSON.stringify(base),
   'hierarchy.bin': concat(record(1, 1, 1, 0, 18), record(0, 0, 1, 18, 18)),
-  'octree.bin': concat(uncompressedPoint(2, 4, 6, 255, 0, 0), uncompressedPoint(4, 6, 8, 0, 255, 0)),
+  'octree.bin': concat(
+    uncompressedPoint(2, 4, 6, 255, 0, 0),
+    uncompressedPoint(4, 6, 8, 0, 255, 0),
+  ),
 };
 
 test('retries a node whose octree range failed transiently', async () => {
   const { fetcher } = flakyCloudFetcher(childFiles, { 'octree.bin bytes=18-35': 1 });
   const errors = [];
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1, retryDelayMs: 10,
+    fetch: fetcher,
+    minNodePixelSize: 1,
+    retryDelayMs: 10,
     onError: (error, node) => errors.push(node),
   });
   const set = display(cloud);
   try {
     const camera = childViewCamera();
-    await waitFor(() => { set.update(camera, 600); return cloud.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return cloud.group.children.length === 2;
+    });
     assert.deepEqual(errors, ['r0']);
-    await waitFor(() => { set.update(camera, 600); return cloud.loadDiagnostics.sceneReadySeconds !== null; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return cloud.loadDiagnostics.sceneReadySeconds !== null;
+    });
   } finally {
     cloud.dispose();
   }
@@ -751,19 +937,28 @@ test('retries a hierarchy chunk that failed transiently', async () => {
   const files = {
     'metadata.json': JSON.stringify(base),
     // Root, then a proxy child whose own chunk lives at byte 44.
-    'hierarchy.bin': concat(record(1, 1, 1, 0, 18), record(2, 0, 1, 44, 22), record(0, 0, 1, 18, 18)),
+    'hierarchy.bin': concat(
+      record(1, 1, 1, 0, 18),
+      record(2, 0, 1, 44, 22),
+      record(0, 0, 1, 18, 18),
+    ),
     'octree.bin': childFiles['octree.bin'],
   };
   const { fetcher } = flakyCloudFetcher(files, { 'hierarchy.bin bytes=44-65': 1 });
   const errors = [];
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1, retryDelayMs: 10,
+    fetch: fetcher,
+    minNodePixelSize: 1,
+    retryDelayMs: 10,
     onError: (error, node) => errors.push(node),
   });
   const set = display(cloud);
   try {
     const camera = childViewCamera();
-    await waitFor(() => { set.update(camera, 600); return cloud.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return cloud.group.children.length === 2;
+    });
     assert.equal(cloud.root.children[0].hierarchyLoaded, true);
     assert.deepEqual(errors, ['r0']);
   } finally {
@@ -775,18 +970,23 @@ test('waits for the retry delay before requesting a failed node again', async ()
   const { fetcher, requests } = flakyCloudFetcher(childFiles, { 'octree.bin bytes=18-35': 1 });
   const errors = [];
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1, retryDelayMs: 60_000,
+    fetch: fetcher,
+    minNodePixelSize: 1,
+    retryDelayMs: 60_000,
     onError: (error, node) => errors.push(node),
   });
   const set = display(cloud);
   try {
     const camera = childViewCamera();
-    await waitFor(() => { set.update(camera, 600); return errors.length === 1; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return errors.length === 1;
+    });
     for (let i = 0; i < 20; i++) {
       set.update(camera, 600);
-      await new Promise(resolve => setTimeout(resolve, 1));
+      await new Promise((resolve) => setTimeout(resolve, 1));
     }
-    assert.equal(requests.filter(r => r === 'octree.bin bytes=18-35').length, 1);
+    assert.equal(requests.filter((r) => r === 'octree.bin bytes=18-35').length, 1);
     assert.equal(cloud.group.children.length, 1);
   } finally {
     cloud.dispose();
@@ -797,9 +997,15 @@ test('an onError that throws neither skips the retry delay of other failed nodes
   const files = {
     'metadata.json': JSON.stringify({ ...base, points: 3, hierarchy: { firstChunkSize: 66 } }),
     // Two children whose adjacent ranges are fetched as one batch.
-    'hierarchy.bin': concat(record(1, 3, 1, 0, 18), record(0, 0, 1, 18, 18), record(0, 0, 1, 36, 18)),
+    'hierarchy.bin': concat(
+      record(1, 3, 1, 0, 18),
+      record(0, 0, 1, 18, 18),
+      record(0, 0, 1, 36, 18),
+    ),
     'octree.bin': concat(
-      uncompressedPoint(8, 8, 8, 0, 0, 0), uncompressedPoint(2, 2, 2, 0, 0, 0), uncompressedPoint(2, 2, 12, 0, 0, 0),
+      uncompressedPoint(8, 8, 8, 0, 0, 0),
+      uncompressedPoint(2, 2, 2, 0, 0, 0),
+      uncompressedPoint(2, 2, 12, 0, 0, 0),
     ),
   };
   const { fetcher, requests } = flakyCloudFetcher(files, { 'octree.bin bytes=18-53': 1 });
@@ -807,12 +1013,17 @@ test('an onError that throws neither skips the retry delay of other failed nodes
   // The thrown errors surface on their own; catch them instead of failing the test run.
   const thrown = [];
   const rejections = [];
-  const saved = ['uncaughtException', 'unhandledRejection'].map(event => [event, process.rawListeners(event)]);
+  const saved = ['uncaughtException', 'unhandledRejection'].map((event) => [
+    event,
+    process.rawListeners(event),
+  ]);
   for (const [event] of saved) process.removeAllListeners(event);
-  process.on('uncaughtException', error => thrown.push(error.message));
-  process.on('unhandledRejection', reason => rejections.push(reason));
+  process.on('uncaughtException', (error) => thrown.push(error.message));
+  process.on('unhandledRejection', (reason) => rejections.push(reason));
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1, retryDelayMs: 60_000,
+    fetch: fetcher,
+    minNodePixelSize: 1,
+    retryDelayMs: 60_000,
     onError: (error, node) => {
       errors.push(node);
       throw new Error(`application failed on ${node}`);
@@ -821,13 +1032,16 @@ test('an onError that throws neither skips the retry delay of other failed nodes
   const set = display(cloud);
   try {
     const camera = childViewCamera();
-    await waitFor(() => { set.update(camera, 600); return errors.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return errors.length === 2;
+    });
     for (let i = 0; i < 20; i++) {
       set.update(camera, 600);
-      await new Promise(resolve => setTimeout(resolve, 1));
+      await new Promise((resolve) => setTimeout(resolve, 1));
     }
     assert.deepEqual(errors.sort(), ['r0', 'r1']);
-    assert.equal(requests.filter(r => r === 'octree.bin bytes=18-53').length, 1);
+    assert.equal(requests.filter((r) => r === 'octree.bin bytes=18-53').length, 1);
     assert.deepEqual(thrown.sort(), ['application failed on r0', 'application failed on r1']);
     assert.deepEqual(rejections, []);
   } finally {
@@ -841,14 +1055,20 @@ test('an onError that throws neither skips the retry delay of other failed nodes
 
 test('parses Retry-After seconds and HTTP dates', () => {
   assert.equal(parseRetryAfter('3'), 3000);
-  assert.equal(parseRetryAfter('Wed, 21 Oct 2015 07:28:05 GMT', Date.parse('Wed, 21 Oct 2015 07:28:00 GMT')), 5000);
+  assert.equal(
+    parseRetryAfter('Wed, 21 Oct 2015 07:28:05 GMT', Date.parse('Wed, 21 Oct 2015 07:28:00 GMT')),
+    5000,
+  );
   assert.equal(parseRetryAfter('soon'), undefined);
   assert.equal(parseRetryAfter(null), undefined);
 });
 
 test('range requests report the HTTP status and Retry-After', async () => {
-  const fetcher = async () => new Response('busy', { status: 429, headers: { 'Retry-After': '2' } });
-  const error = await fetchRange(new URL('https://example.test/octree.bin'), 0n, 2n, fetcher).catch(e => e);
+  const fetcher = async () =>
+    new Response('busy', { status: 429, headers: { 'Retry-After': '2' } });
+  const error = await fetchRange(new URL('https://example.test/octree.bin'), 0n, 2n, fetcher).catch(
+    (e) => e,
+  );
   assert.ok(error instanceof HttpError);
   assert.equal(error.status, 429);
   assert.equal(error.retryAfterMs, 2000);
@@ -861,7 +1081,12 @@ test('a throttled origin pauses new requests and halves concurrency', async () =
   const releases = [];
   const pending = [];
   for (let i = 0; i < 4; i++) {
-    pending.push(gate.request(() => new Promise((resolve, reject) => releases.push({ resolve, reject })), 1000));
+    pending.push(
+      gate.request(
+        () => new Promise((resolve, reject) => releases.push({ resolve, reject })),
+        1000,
+      ),
+    );
   }
   releases[0].reject(new HttpError('busy', 429, 40));
   await assert.rejects(pending[0], HttpError);
@@ -870,7 +1095,7 @@ test('a throttled origin pauses new requests and halves concurrency', async () =
   releases[1].reject(new HttpError('busy', 503));
   await assert.rejects(pending[1], HttpError);
   assert.equal(gate.concurrencyLimit, 2);
-  await new Promise(resolve => setTimeout(resolve, 50));
+  await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(gate.available(), 0, 'two requests are still in flight');
   releases[2].resolve();
   releases[3].resolve();
@@ -881,57 +1106,90 @@ test('a throttled origin pauses new requests and halves concurrency', async () =
 test('retry waits for the gate and gives up on other errors', async () => {
   const gate = new RequestGate();
   let calls = 0;
-  const result = await gate.retry(() => gate.request(async () => {
-    if (++calls < 3) throw new HttpError('busy', 503);
-    return 'ok';
-  }, 5), 6);
+  const result = await gate.retry(
+    () =>
+      gate.request(async () => {
+        if (++calls < 3) throw new HttpError('busy', 503);
+        return 'ok';
+      }, 5),
+    6,
+  );
   assert.equal(result, 'ok');
   assert.equal(calls, 3);
   calls = 0;
-  await assert.rejects(gate.retry(() => gate.request(async () => {
-    calls++;
-    throw new HttpError('missing', 404);
-  }, 5), 6), /missing/);
+  await assert.rejects(
+    gate.retry(
+      () =>
+        gate.request(async () => {
+          calls++;
+          throw new HttpError('missing', 404);
+        }, 5),
+      6,
+    ),
+    /missing/,
+  );
   assert.equal(calls, 1);
 });
 
 test('concurrent retries after a pause never exceed the lowered limit', async () => {
   const gate = new RequestGate();
-  await assert.rejects(gate.request(async () => { throw new HttpError('busy', 429, 20); }, 10), HttpError);
+  await assert.rejects(
+    gate.request(async () => {
+      throw new HttpError('busy', 429, 20);
+    }, 10),
+    HttpError,
+  );
   assert.equal(gate.concurrencyLimit, 1);
-  await new Promise(resolve => setTimeout(resolve, 30));
+  await new Promise((resolve) => setTimeout(resolve, 30));
   let running = 0;
   const limits = [];
-  const task = () => gate.request(async () => {
-    running++;
-    limits.push([running, gate.concurrencyLimit]);
-    await new Promise(resolve => setTimeout(resolve, 20));
-    running--;
-  }, 10);
+  const task = () =>
+    gate.request(async () => {
+      running++;
+      limits.push([running, gate.concurrencyLimit]);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      running--;
+    }, 10);
   // All see the pause over in the same turn; only one may take the single slot, and
   // the others start as successes raise the limit again.
   await Promise.all([gate.retry(task, 3), gate.retry(task, 3), task()]);
   assert.equal(limits.length, 3);
   assert.deepEqual(limits[0], [1, 1]);
-  for (const [count, limit] of limits) assert.ok(count <= limit, `${count} requests at limit ${limit}`);
+  for (const [count, limit] of limits)
+    assert.ok(count <= limit, `${count} requests at limit ${limit}`);
 });
 
 test('a request waiting for a slot is abandoned when its signal aborts', async () => {
   const gate = new RequestGate();
-  await assert.rejects(gate.request(async () => { throw new HttpError('busy', 429, 1000); }, 10), HttpError);
+  await assert.rejects(
+    gate.request(async () => {
+      throw new HttpError('busy', 429, 1000);
+    }, 10),
+    HttpError,
+  );
   const controller = new AbortController();
   let started = false;
-  const waiting = gate.request(async () => { started = true; }, 10, controller.signal);
+  const waiting = gate.request(
+    async () => {
+      started = true;
+    },
+    10,
+    controller.signal,
+  );
   controller.abort();
   await assert.rejects(waiting, { name: 'AbortError' });
   assert.equal(started, false);
-  await new Promise(resolve => setTimeout(resolve, 1010));
+  await new Promise((resolve) => setTimeout(resolve, 1010));
   assert.equal(gate.available(), 1, 'the abandoned wait holds no slot');
 });
 
 test('load retries throttled metadata and root requests', async () => {
   let metadataFailures = 1;
-  const { fetcher } = flakyCloudFetcher(childFiles, { 'hierarchy.bin bytes=0-43': 1, 'octree.bin bytes=0-17': 1 }, 429);
+  const { fetcher } = flakyCloudFetcher(
+    childFiles,
+    { 'hierarchy.bin bytes=0-43': 1, 'octree.bin bytes=0-17': 1 },
+    429,
+  );
   const throttledMetadata = async (url, init) => {
     if (new URL(url).pathname.endsWith('metadata.json') && metadataFailures-- > 0) {
       return new Response(null, { status: 503, headers: { 'Retry-After': '0' } });
@@ -939,7 +1197,8 @@ test('load retries throttled metadata and root requests', async () => {
     return fetcher(url, init);
   };
   const cloud = await loadPotreeV2('https://throttled-load.test/cloud/metadata.json', {
-    fetch: throttledMetadata, retryDelayMs: 5,
+    fetch: throttledMetadata,
+    retryDelayMs: 5,
   });
   try {
     assert.equal(cloud.group.children.length, 1);
@@ -953,16 +1212,24 @@ test('throttled node loads are retried without reporting errors', async () => {
   const { fetcher, requests } = flakyCloudFetcher(childFiles, { 'octree.bin bytes=18-35': 1 }, 429);
   const errors = [];
   const cloud = await loadPotreeV2('https://throttled-node.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1, retryDelayMs: 20,
+    fetch: fetcher,
+    minNodePixelSize: 1,
+    retryDelayMs: 20,
     onError: (error, node) => errors.push(node),
   });
   const set = display(cloud);
   try {
     const camera = childViewCamera();
-    await waitFor(() => { set.update(camera, 600); return requests.includes('octree.bin bytes=18-35'); });
-    await waitFor(() => { set.update(camera, 600); return cloud.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return requests.includes('octree.bin bytes=18-35');
+    });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return cloud.group.children.length === 2;
+    });
     assert.deepEqual(errors, []);
-    assert.equal(requests.filter(r => r === 'octree.bin bytes=18-35').length, 2);
+    assert.equal(requests.filter((r) => r === 'octree.bin bytes=18-35').length, 2);
     assert.equal(cloud.loadDiagnostics.throttledResponses, 1);
   } finally {
     cloud.dispose();
@@ -974,12 +1241,17 @@ test('stops selecting once the most important remaining node exceeds the point b
   const files = {
     'metadata.json': JSON.stringify(metadata),
     // r0 (near the camera, 5 points) outranks r1 (1 point), which alone would still fit.
-    'hierarchy.bin': concat(record(1, 3, 1, 0, 18), record(0, 0, 5, 18, 90), record(0, 0, 1, 108, 18)),
+    'hierarchy.bin': concat(
+      record(1, 3, 1, 0, 18),
+      record(0, 0, 5, 18, 90),
+      record(0, 0, 1, 108, 18),
+    ),
     'octree.bin': concat(uncompressedPoint(2, 4, 6, 255, 0, 0), new Uint8Array(108)),
   };
   const { fetcher, requests } = flakyCloudFetcher(files, {});
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1,
+    fetch: fetcher,
+    minNodePixelSize: 1,
   });
   const set = display(cloud, { pointBudget: 3 });
   try {
@@ -988,7 +1260,10 @@ test('stops selecting once the most important remaining node exceeds the point b
     camera.lookAt(2, 2, 2);
     set.update(camera, 600);
     assert.equal(cloud.loadDiagnostics.requiredNodes, 1);
-    assert.deepEqual(requests.filter(r => r.startsWith('octree.bin')), ['octree.bin bytes=0-17']);
+    assert.deepEqual(
+      requests.filter((r) => r.startsWith('octree.bin')),
+      ['octree.bin bytes=0-17'],
+    );
   } finally {
     cloud.dispose();
   }
@@ -1002,7 +1277,10 @@ test('point budget excludes even the first node when it does not fit', async () 
     const camera = childViewCamera();
     set.update(camera, 600);
     assert.equal(cloud.loadDiagnostics.requiredNodes, 0);
-    assert.equal(cloud.group.children.filter(child => child.type === 'Points' && child.visible).length, 0);
+    assert.equal(
+      cloud.group.children.filter((child) => child.type === 'Points' && child.visible).length,
+      0,
+    );
     set.pointBudget = 0.5;
     set.update(camera, 600);
     assert.equal(cloud.loadDiagnostics.requiredNodes, 0);
@@ -1011,7 +1289,10 @@ test('point budget excludes even the first node when it does not fit', async () 
     assert.equal(cloud.loadDiagnostics.requiredNodes, 1);
     set.pointBudget = 0;
     assert.equal(set.update(camera, 600), true);
-    assert.equal(cloud.group.children.filter(child => child.type === 'Points' && child.visible).length, 0);
+    assert.equal(
+      cloud.group.children.filter((child) => child.type === 'Points' && child.visible).length,
+      0,
+    );
   } finally {
     cloud.dispose();
   }
@@ -1020,15 +1301,20 @@ test('point budget excludes even the first node when it does not fit', async () 
 test('node objects take the group layers, including nodes loaded later and layer changes', async () => {
   const { fetcher } = flakyCloudFetcher(childFiles, {});
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1, showBoundingBoxes: true,
+    fetch: fetcher,
+    minNodePixelSize: 1,
+    showBoundingBoxes: true,
   });
   const set = display(cloud);
   try {
     const camera = childViewCamera();
     cloud.group.layers.set(2);
-    await waitFor(() => { set.update(camera, 600); return cloud.group.children.filter(child => child.isPoints).length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return cloud.group.children.filter((child) => child.isPoints).length === 2;
+    });
     set.update(camera, 600);
-    const masks = () => cloud.group.children.map(child => child.layers.mask);
+    const masks = () => cloud.group.children.map((child) => child.layers.mask);
     assert.equal(cloud.group.children.length, 4);
     assert.deepEqual(masks(), [4, 4, 4, 4]);
     assert.equal(set.update(camera, 600), false);
@@ -1049,15 +1335,19 @@ test('aborts octree requests the view stopped needing and requests them again la
     if (init.headers?.Range === 'bytes=18-35' && hang) {
       hang = false;
       signals.push(init.signal);
-      return new Promise((_, reject) => init.signal.addEventListener('abort', () => {
-        reject(new DOMException('The operation was aborted', 'AbortError'));
-      }));
+      return new Promise((_, reject) =>
+        init.signal.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted', 'AbortError'));
+        }),
+      );
     }
     return files(url, init);
   };
   const errors = [];
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1, onError: (error, node) => errors.push(node),
+    fetch: fetcher,
+    minNodePixelSize: 1,
+    onError: (error, node) => errors.push(node),
   });
   const set = display(cloud);
   try {
@@ -1068,10 +1358,16 @@ test('aborts octree requests the view stopped needing and requests them again la
     cloud.minNodePixelSize = 10_000;
     set.update(camera, 600);
     assert.equal(signals[0].aborted, false);
-    await waitFor(() => { set.update(camera, 600); return signals[0].aborted; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return signals[0].aborted;
+    });
     assert.equal(cloud.loadDiagnostics.abortedRequests, 1);
     cloud.minNodePixelSize = 1;
-    await waitFor(() => { set.update(camera, 600); return cloud.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return cloud.group.children.length === 2;
+    });
     assert.deepEqual(errors, []);
   } finally {
     cloud.dispose();
@@ -1080,16 +1376,25 @@ test('aborts octree requests the view stopped needing and requests them again la
 
 test('update skips traversal as soon as the view is in the scene and still completes the measurement', async () => {
   const { fetcher } = flakyCloudFetcher(childFiles, {});
-  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, minNodePixelSize: 1 });
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher,
+    minNodePixelSize: 1,
+  });
   const set = display(cloud);
   try {
     const camera = childViewCamera();
-    await waitFor(() => { set.update(camera, 600); return cloud.settled; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return cloud.settled;
+    });
     assert.equal(cloud.loadDiagnostics.state, 'loading');
     let traversals = 0;
     const updateLoadDiagnostics = cloud.updateLoadDiagnostics.bind(cloud);
-    cloud.updateLoadDiagnostics = (...args) => { traversals++; return updateLoadDiagnostics(...args); };
-    await new Promise(resolve => setTimeout(resolve, 550));
+    cloud.updateLoadDiagnostics = (...args) => {
+      traversals++;
+      return updateLoadDiagnostics(...args);
+    };
+    await new Promise((resolve) => setTimeout(resolve, 550));
     assert.equal(set.update(camera, 600), false);
     assert.equal(traversals, 0);
     assert.equal(cloud.loadDiagnostics.state, 'complete');
@@ -1118,7 +1423,10 @@ test('decodes only position and rgb by default and skips other attributes', asyn
   assert.deepEqual([...geometry.getAttribute('color').array], [255, 128, 1, 255]);
   geometry.dispose();
 
-  const selected = await decodeNode(data.buffer, node, intensityMetadata, ['position', 'intensity']);
+  const selected = await decodeNode(data.buffer, node, intensityMetadata, [
+    'position',
+    'intensity',
+  ]);
   assert.deepEqual(Object.keys(selected.attributes).sort(), ['intensity', 'position']);
   assert.deepEqual([...selected.getAttribute('intensity').array], [0x1234]);
   // 16-bit integers keep their type instead of becoming floats.
@@ -1137,7 +1445,8 @@ test('skips unrequested Brotli attribute columns', async () => {
   view.setUint16(16, 0x1234, true);
   view.setBigUint64(18, morton(100, 200, 300, 16), true);
   const compressed = brotliCompressSync(Buffer.from(raw));
-  const bytes = () => compressed.buffer.slice(compressed.byteOffset, compressed.byteOffset + compressed.byteLength);
+  const bytes = () =>
+    compressed.buffer.slice(compressed.byteOffset, compressed.byteOffset + compressed.byteLength);
   const geometry = await decodeNode(bytes(), node, metadata);
   assert.deepEqual(Object.keys(geometry.attributes).sort(), ['color', 'position']);
   assert.deepEqual([...geometry.getAttribute('color').array], [100, 200, 1, 255]);
@@ -1154,42 +1463,90 @@ test('skips unrequested Brotli attribute columns', async () => {
  */
 const genericAttributes = [
   {
-    name: 'pair', type: 'uint16', size: 4, numElements: 2, elementSize: 2,
-    write: (view, at, i) => { view.setUint16(at, 1000 + i, true); view.setUint16(at + 2, 65535 - i, true); },
-    expected: i => [1000 + i, 65535 - i],
+    name: 'pair',
+    type: 'uint16',
+    size: 4,
+    numElements: 2,
+    elementSize: 2,
+    write: (view, at, i) => {
+      view.setUint16(at, 1000 + i, true);
+      view.setUint16(at + 2, 65535 - i, true);
+    },
+    expected: (i) => [1000 + i, 65535 - i],
   },
   {
-    name: 'height', type: 'float', size: 4, numElements: 1, elementSize: 4,
-    write: (view, at, i) => view.setFloat32(at, -1.5 * i, true), expected: i => [-1.5 * i],
+    name: 'height',
+    type: 'float',
+    size: 4,
+    numElements: 1,
+    elementSize: 4,
+    write: (view, at, i) => view.setFloat32(at, -1.5 * i, true),
+    expected: (i) => [-1.5 * i],
   },
   {
-    name: 'time', type: 'double', size: 8, numElements: 1, elementSize: 8, min: [1000], max: [1100],
-    write: (view, at, i) => view.setFloat64(at, 1000 + i * 2, true), expected: i => [Math.fround(i * 2 / 100)],
+    name: 'time',
+    type: 'double',
+    size: 8,
+    numElements: 1,
+    elementSize: 8,
+    min: [1000],
+    max: [1100],
+    write: (view, at, i) => view.setFloat64(at, 1000 + i * 2, true),
+    expected: (i) => [Math.fround((i * 2) / 100)],
   },
   {
-    name: 'id', type: 'int64', size: 8, numElements: 1, elementSize: 8, min: [-10], max: [90],
-    write: (view, at, i) => view.setBigInt64(at, BigInt(i * 10 - 10), true), expected: i => [Math.fround(i / 10)],
+    name: 'id',
+    type: 'int64',
+    size: 8,
+    numElements: 1,
+    elementSize: 8,
+    min: [-10],
+    max: [90],
+    write: (view, at, i) => view.setBigInt64(at, BigInt(i * 10 - 10), true),
+    expected: (i) => [Math.fround(i / 10)],
   },
   {
-    name: 'flag', type: 'int8', size: 1, numElements: 1, elementSize: 1,
-    write: (view, at, i) => view.setInt8(at, 1 - i), expected: i => [1 - i],
+    name: 'flag',
+    type: 'int8',
+    size: 1,
+    numElements: 1,
+    elementSize: 1,
+    write: (view, at, i) => view.setInt8(at, 1 - i),
+    expected: (i) => [1 - i],
   },
   {
-    name: 'count', type: 'uint32', size: 4, numElements: 1, elementSize: 4,
-    write: (view, at, i) => view.setUint32(at, 4_000_000_000 + i, true), expected: i => [Math.fround(4_000_000_000 + i)],
+    name: 'count',
+    type: 'uint32',
+    size: 4,
+    numElements: 1,
+    elementSize: 4,
+    write: (view, at, i) => view.setUint32(at, 4_000_000_000 + i, true),
+    expected: (i) => [Math.fround(4_000_000_000 + i)],
   },
   {
-    name: 'constant', type: 'double', size: 8, numElements: 1, elementSize: 8, min: [5], max: [5],
-    write: (view, at) => view.setFloat64(at, 5, true), expected: () => [0],
+    name: 'constant',
+    type: 'double',
+    size: 8,
+    numElements: 1,
+    elementSize: 8,
+    min: [5],
+    max: [5],
+    write: (view, at) => view.setFloat64(at, 5, true),
+    expected: () => [0],
   },
 ];
-const genericNames = genericAttributes.map(a => a.name);
+const genericNames = genericAttributes.map((a) => a.name);
 
 /** A node whose point i stores the generic attribute values for i + seed. */
 function genericNode(encoding, pointCount, seed = 0) {
   const metadata = {
-    ...base, encoding, points: pointCount,
-    attributes: [base.attributes[0], ...genericAttributes.map(({ write, expected, ...attribute }) => attribute)],
+    ...base,
+    encoding,
+    points: pointCount,
+    attributes: [
+      base.attributes[0],
+      ...genericAttributes.map(({ write, expected, ...attribute }) => attribute),
+    ],
   };
   const node = createRoot(metadata);
   node.numPoints = pointCount;
@@ -1206,18 +1563,28 @@ function genericNode(encoding, pointCount, seed = 0) {
   let field = positionSize;
   for (const attribute of genericAttributes) {
     for (let i = 0; i < pointCount; i++) {
-      attribute.write(view, compressed ? column + i * attribute.size : i * pointSize + field, i + seed);
+      attribute.write(
+        view,
+        compressed ? column + i * attribute.size : i * pointSize + field,
+        i + seed,
+      );
     }
     column += attribute.size * pointCount;
     field += attribute.size;
   }
   const bytes = compressed ? brotliCompressSync(Buffer.from(raw)) : new Uint8Array(raw);
-  return { metadata, node, bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+  return {
+    metadata,
+    node,
+    bytes: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+  };
 }
 
 function assertGenericValues(geometry, pointCount, seed = 0) {
   for (const attribute of genericAttributes) {
-    const expected = Array.from({ length: pointCount }, (_, i) => attribute.expected(i + seed)).flat();
+    const expected = Array.from({ length: pointCount }, (_, i) =>
+      attribute.expected(i + seed),
+    ).flat();
     assert.deepEqual([...geometry.getAttribute(attribute.name).array], expected, attribute.name);
   }
 }
@@ -1234,8 +1601,14 @@ for (const encoding of ['DEFAULT', 'BROTLI']) {
 test('Brotli results stay valid after the decoder reuses its memory', async () => {
   const first = genericNode('BROTLI', 3, 0);
   const second = genericNode('BROTLI', 3, 7);
-  const a = await decodeNode(first.bytes, first.node, first.metadata, ['position', ...genericNames]);
-  const b = await decodeNode(second.bytes, second.node, second.metadata, ['position', ...genericNames]);
+  const a = await decodeNode(first.bytes, first.node, first.metadata, [
+    'position',
+    ...genericNames,
+  ]);
+  const b = await decodeNode(second.bytes, second.node, second.metadata, [
+    'position',
+    ...genericNames,
+  ]);
   assertGenericValues(a, 3, 0);
   assertGenericValues(b, 3, 7);
   assert.deepEqual([...a.getAttribute('position').array], [0, 0, 0, 0.5, 0.5, 0.5, 1, 1, 1]);
@@ -1249,10 +1622,16 @@ test('picked attributes map normalized 64-bit values back to the metadata range'
     'octree.bin': new Uint8Array(bytes),
   };
   const { fetcher } = flakyCloudFetcher(files, {});
-  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, attributes: genericNames });
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher,
+    attributes: genericNames,
+  });
   try {
     const points = cloud.group.children[0];
-    const { attributes } = cloud.pickResult({ target: { node: cloud.root, points }, index: 2, distance: 0 }, 1);
+    const { attributes } = cloud.pickResult(
+      { target: { node: cloud.root, points }, index: 2, distance: 0 },
+      1,
+    );
     // Within float32 precision of the 100-wide range.
     assert.ok(Math.abs(attributes.time[0] - 1004) < 1e-4, String(attributes.time));
     assert.ok(Math.abs(attributes.id[0] - 10) < 1e-4, String(attributes.id));
@@ -1271,12 +1650,16 @@ test('attributes option selects decoded attributes and rejects unknown names', a
   const files = {
     'metadata.json': JSON.stringify({ ...intensityMetadata, hierarchy: { firstChunkSize: 22 } }),
     'hierarchy.bin': record(0, 0, 1, 0, 20),
-    'octree.bin': concat(uncompressedPoint(2, 4, 6, 1, 2, 3).subarray(0, 12), new Uint8Array([7, 0]),
-      uncompressedPoint(0, 0, 0, 1, 2, 3).subarray(12)),
+    'octree.bin': concat(
+      uncompressedPoint(2, 4, 6, 1, 2, 3).subarray(0, 12),
+      new Uint8Array([7, 0]),
+      uncompressedPoint(0, 0, 0, 1, 2, 3).subarray(12),
+    ),
   };
   const { fetcher } = flakyCloudFetcher(files, {});
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, attributes: ['intensity'],
+    fetch: fetcher,
+    attributes: ['intensity'],
   });
   try {
     const geometry = cloud.group.children[0].geometry;
@@ -1287,16 +1670,28 @@ test('attributes option selects decoded attributes and rejects unknown names', a
     cloud.dispose();
   }
   // A color type adds its own attribute to the default ones.
-  const colored = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, material: { colorType: 'intensity' } });
+  const colored = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher,
+    material: { colorType: 'intensity' },
+  });
   try {
-    assert.deepEqual(Object.keys(colored.group.children[0].geometry.attributes).sort(), ['color', 'intensity', 'position']);
+    assert.deepEqual(Object.keys(colored.group.children[0].geometry.attributes).sort(), [
+      'color',
+      'intensity',
+      'position',
+    ]);
     assert.equal(colored.material.colorType, 'intensity');
-    assert.throws(() => { colored.material.colorType = 'classification'; }, /classification/);
+    assert.throws(() => {
+      colored.material.colorType = 'classification';
+    }, /classification/);
   } finally {
     colored.dispose();
   }
   await assert.rejects(
-    loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, attributes: ['Intensity'] }),
+    loadPotreeV2('https://example.test/cloud/metadata.json', {
+      fetch: fetcher,
+      attributes: ['Intensity'],
+    }),
     /no attribute: Intensity/,
   );
 });
@@ -1304,13 +1699,17 @@ test('attributes option selects decoded attributes and rejects unknown names', a
 test('evicts least recently displayed nodes and drops their idle state', async () => {
   const { fetcher, requests } = flakyCloudFetcher(childFiles, {});
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1,
+    fetch: fetcher,
+    minNodePixelSize: 1,
   });
   const set = display(cloud, { cachePointBudget: 1 });
   try {
     const camera = childViewCamera();
     const child = cloud.root.children[0];
-    await waitFor(() => { set.update(camera, 600); return cloud.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return cloud.group.children.length === 2;
+    });
     // Displayed nodes are kept even over the cache budget.
     set.update(camera, 600);
     assert.equal(cloud.group.children.length, 2);
@@ -1318,14 +1717,20 @@ test('evicts least recently displayed nodes and drops their idle state', async (
 
     cloud.minNodePixelSize = 10_000;
     set.update(camera, 600);
-    assert.deepEqual(cloud.group.children.map(node => node.name), ['r']);
+    assert.deepEqual(
+      cloud.group.children.map((node) => node.name),
+      ['r'],
+    );
     assert.deepEqual([...cloud.installed.keys()], [cloud.root]);
     assert.equal(cloud.states.has(child), false);
     assert.equal(cloud.states.size, 1);
 
     cloud.minNodePixelSize = 1;
-    await waitFor(() => { set.update(camera, 600); return cloud.group.children.length === 2; });
-    assert.equal(requests.filter(request => request === 'octree.bin bytes=18-35').length, 2);
+    await waitFor(() => {
+      set.update(camera, 600);
+      return cloud.group.children.length === 2;
+    });
+    assert.equal(requests.filter((request) => request === 'octree.bin bytes=18-35').length, 2);
   } finally {
     cloud.dispose();
   }
@@ -1335,17 +1740,23 @@ test('a batch frees its request slot while it waits for decoding', async () => {
   const metadata = { ...base, points: 3, hierarchy: { firstChunkSize: 66 } };
   const files = {
     'metadata.json': JSON.stringify(metadata),
-    'hierarchy.bin': concat(record(1, 3, 1, 0, 18), record(0, 0, 1, 18, 18), record(0, 0, 1, 70_000, 18)),
+    'hierarchy.bin': concat(
+      record(1, 3, 1, 0, 18),
+      record(0, 0, 1, 18, 18),
+      record(0, 0, 1, 70_000, 18),
+    ),
     'octree.bin': new Uint8Array(70_018),
   };
   const { fetcher, requests } = flakyCloudFetcher(files, {});
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, decoderWorkers: 2,
+    fetch: fetcher,
+    decoderWorkers: 2,
   });
   const set = display(cloud, { maxConcurrentLoads: 1 });
   const releases = [];
   const decodeBatch = cloud.decoder.decodeBatch.bind(cloud.decoder);
-  cloud.decoder.decodeBatch = (...args) => new Promise(resolve => releases.push(() => resolve(decodeBatch(...args))));
+  cloud.decoder.decodeBatch = (...args) =>
+    new Promise((resolve) => releases.push(() => resolve(decodeBatch(...args))));
   try {
     const [r0, r1] = cloud.root.children;
     cloud.constructor.requestBatches([{ cloud, pending: [r0, r1] }], set.limits());
@@ -1353,9 +1764,11 @@ test('a batch frees its request slot while it waits for decoding', async () => {
     assert.equal(cloud.inFlight, 0);
     cloud.constructor.requestBatches([{ cloud, pending: [r0, r1] }], set.limits());
     await waitFor(() => releases.length === 2);
-    assert.deepEqual(requests.filter(r => r.startsWith('octree.bin')).slice(1),
-      ['octree.bin bytes=18-35', 'octree.bin bytes=70000-70017']);
-    releases.forEach(release => release());
+    assert.deepEqual(requests.filter((r) => r.startsWith('octree.bin')).slice(1), [
+      'octree.bin bytes=18-35',
+      'octree.bin bytes=70000-70017',
+    ]);
+    releases.forEach((release) => release());
     await waitFor(() => cloud.decodedQueue.length === 2);
   } finally {
     cloud.dispose();
@@ -1368,45 +1781,54 @@ test('octree requests use every free slot and wait only while decode jobs fill t
   const metadata = { ...base, points: 9, hierarchy: { firstChunkSize: 22 * 9 } };
   const files = {
     'metadata.json': JSON.stringify(metadata),
-    'hierarchy.bin': concat(record(1, 0xff, 1, 0, 18), ...offsets.map(offset => record(0, 0, 1, offset, 18))),
+    'hierarchy.bin': concat(
+      record(1, 0xff, 1, 0, 18),
+      ...offsets.map((offset) => record(0, 0, 1, offset, 18)),
+    ),
     'octree.bin': new Uint8Array(offsets.at(-1) + 18),
   };
   const { fetcher: files206 } = flakyCloudFetcher(files, {});
   const held = [];
   const fetcher = (url, init = {}) => {
-    const child = url.pathname?.endsWith('octree.bin') && !init.headers.Range.startsWith('bytes=0-');
+    const child =
+      url.pathname?.endsWith('octree.bin') && !init.headers.Range.startsWith('bytes=0-');
     if (!child) return files206(url, init);
-    return new Promise(resolve => held.push(() => resolve(files206(url, init))));
+    return new Promise((resolve) => held.push(() => resolve(files206(url, init))));
   };
   // Workers that decode only when the test answers, so decode jobs stay in the backlog.
   const originalWorker = globalThis.Worker;
   const posted = [];
   globalThis.Worker = class {
-    postMessage(message) { if (message.id !== undefined) posted.push({ worker: this, message }); }
+    postMessage(message) {
+      if (message.id !== undefined) posted.push({ worker: this, message });
+    }
     terminate() {}
   };
   const respond = async () => {
     await waitFor(() => posted.length > 0);
     const { worker, message } = posted.shift();
     const nodes = [];
-    for (const node of message.nodes) nodes.push(await decodeBatchNode(message.bytes, message.start, node, message.metadata));
+    for (const node of message.nodes)
+      nodes.push(await decodeBatchNode(message.bytes, message.start, node, message.metadata));
     worker.onmessage({ data: { id: message.id, nodes } });
   };
   let cloud;
   try {
     const loading = loadPotreeV2('https://example.test/cloud/metadata.json', {
-      fetch: fetcher, decoderWorkers: 1,
+      fetch: fetcher,
+      decoderWorkers: 1,
     });
     await respond(); // The root.
     cloud = await loading;
     const set = display(cloud, { maxConcurrentLoads: 6 });
     const children = cloud.root.children.filter(Boolean);
-    const request = () => cloud.constructor.requestBatches([{ cloud, pending: children }], set.limits());
+    const request = () =>
+      cloud.constructor.requestBatches([{ cloud, pending: children }], set.limits());
     request();
     // One Worker, yet all 6 request slots are used: batches being fetched are not decode jobs.
     assert.equal(held.length, 6);
     assert.equal(cloud.decoder.backlog, 0);
-    held.splice(0).forEach(release => release());
+    held.splice(0).forEach((release) => release());
     await waitFor(() => cloud.decoder.backlog === 6);
     // The arrived batches fill the backlog of one Worker, so the other children wait.
     request();
@@ -1415,7 +1837,7 @@ test('octree requests use every free slot and wait only while decode jobs fill t
     assert.equal(cloud.decoder.backlog, 1);
     request();
     assert.equal(held.length, 2);
-    held.splice(0).forEach(release => release());
+    held.splice(0).forEach((release) => release());
     for (let i = 0; i < 3; i++) await respond();
     await waitFor(() => cloud.decodedQueue.length === 8);
   } finally {
@@ -1429,7 +1851,12 @@ test('a cached node between missing ones starts no more requests than the limits
   const metadata = { ...base, points: 4, hierarchy: { firstChunkSize: 88 } };
   const files = {
     'metadata.json': JSON.stringify(metadata),
-    'hierarchy.bin': concat(record(1, 7, 1, 0, 18), record(0, 0, 1, 18, 18), record(0, 0, 1, 36, 18), record(0, 0, 1, 54, 18)),
+    'hierarchy.bin': concat(
+      record(1, 7, 1, 0, 18),
+      record(0, 0, 1, 18, 18),
+      record(0, 0, 1, 36, 18),
+      record(0, 0, 1, 54, 18),
+    ),
     'octree.bin': new Uint8Array(72),
   };
   const { fetcher: files206 } = flakyCloudFetcher(files, {});
@@ -1437,10 +1864,11 @@ test('a cached node between missing ones starts no more requests than the limits
   const held = [];
   const fetcher = (url, init = {}) => {
     if (!hold || !url.pathname?.endsWith('octree.bin')) return files206(url, init);
-    return new Promise(resolve => held.push(() => resolve(files206(url, init))));
+    return new Promise((resolve) => held.push(() => resolve(files206(url, init))));
   };
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, cacheEncodedNodes: true,
+    fetch: fetcher,
+    cacheEncodedNodes: true,
   });
   const set = display(cloud, { maxConcurrentLoads: 1, encodedCacheByteBudget: 1024 });
   try {
@@ -1455,7 +1883,7 @@ test('a cached node between missing ones starts no more requests than the limits
     assert.equal(held.length, 1);
     await waitFor(() => cloud.decodedQueue.length === 1);
     assert.equal(cloud.decodedQueue[0].node, children[1]);
-    held.splice(0).forEach(release => release());
+    held.splice(0).forEach((release) => release());
     await waitFor(() => cloud.decodedQueue.length === 2);
   } finally {
     cloud.dispose();
@@ -1464,22 +1892,31 @@ test('a cached node between missing ones starts no more requests than the limits
 
 test('update skips unchanged settled views and reports scene changes', async () => {
   const { fetcher } = flakyCloudFetcher(childFiles, {});
-  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, minNodePixelSize: 1 });
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher,
+    minNodePixelSize: 1,
+  });
   const set = display(cloud);
   try {
     const camera = childViewCamera();
     let changed = false;
-    await waitFor(() => { changed = set.update(camera, 600) || changed; return cloud.group.children.length === 2; });
+    await waitFor(() => {
+      changed = set.update(camera, 600) || changed;
+      return cloud.group.children.length === 2;
+    });
     assert.equal(changed, true);
     const deadline = Date.now() + 3000;
     while (cloud.loadDiagnostics.state !== 'complete' || !cloud.settled) {
       assert.ok(Date.now() < deadline, 'load did not settle');
       set.update(camera, 600);
-      await new Promise(resolve => setTimeout(resolve, 20));
+      await new Promise((resolve) => setTimeout(resolve, 20));
     }
     let traversals = 0;
     const updateLoadDiagnostics = cloud.updateLoadDiagnostics.bind(cloud);
-    cloud.updateLoadDiagnostics = (...args) => { traversals++; return updateLoadDiagnostics(...args); };
+    cloud.updateLoadDiagnostics = (...args) => {
+      traversals++;
+      return updateLoadDiagnostics(...args);
+    };
     assert.equal(set.update(camera, 600), false);
     assert.equal(set.update(camera, 600), false);
     assert.equal(traversals, 0);
@@ -1492,7 +1929,7 @@ test('update skips unchanged settled views and reports scene changes', async () 
     // A settings change forces a traversal, which hides the child.
     cloud.minNodePixelSize = 10_000;
     assert.equal(set.update(camera, 600), true);
-    assert.equal(cloud.group.children.find(child => child.name === 'r0').visible, false);
+    assert.equal(cloud.group.children.find((child) => child.name === 'r0').visible, false);
     // Camera movement is detected as well.
     cloud.minNodePixelSize = 1;
     camera.position.z = 19;
@@ -1507,7 +1944,12 @@ async function loadChildClouds(count) {
   const clouds = [];
   for (let i = 0; i < count; i++) {
     const { fetcher } = flakyCloudFetcher(childFiles, {});
-    clouds.push(await loadPotreeV2(`https://example.test/cloud${i}/metadata.json`, { fetch: fetcher, minNodePixelSize: 1 }));
+    clouds.push(
+      await loadPotreeV2(`https://example.test/cloud${i}/metadata.json`, {
+        fetch: fetcher,
+        minNodePixelSize: 1,
+      }),
+    );
   }
   return clouds;
 }
@@ -1520,14 +1962,20 @@ test('a cloud set shares one point budget, preferring the larger projected nodes
   try {
     far.group.position.z = -20; // Its child projects smaller than the near cloud's child.
     const camera = childViewCamera();
-    await waitFor(() => { set.update(camera, 600); return near.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return near.group.children.length === 2;
+    });
     set.update(camera, 600);
     // Two roots and one child fit in 3 points; each cloud's own 2,000,000 budget is ignored.
     assert.equal(near.loadDiagnostics.requiredNodes, 2);
     assert.equal(far.loadDiagnostics.requiredNodes, 1);
     assert.equal(far.group.children.length, 1);
     set.pointBudget = 4;
-    await waitFor(() => { set.update(camera, 600); return far.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return far.group.children.length === 2;
+    });
   } finally {
     near.dispose();
     far.dispose();
@@ -1548,7 +1996,10 @@ test('a hidden cloud selects nothing, leaving the shared budget to visible cloud
     assert.equal(near.loadDiagnostics.requiredNodes, 1);
     assert.equal(far.loadDiagnostics.requiredNodes, 1);
     parent.visible = false; // An ancestor hides far, as group.visible = false would.
-    await waitFor(() => { set.update(camera, 600); return near.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return near.group.children.length === 2;
+    });
     assert.equal(far.loadDiagnostics.requiredNodes, 0);
     assert.equal(far.group.children[0].visible, false);
     assert.equal(await far.pick({}, camera, 300, 300), null);
@@ -1582,8 +2033,14 @@ test('a cloud set evicts the least recently displayed node across clouds', async
     assert.equal(b.group.children.length, 2);
     set.cachePointBudget = 3;
     assert.equal(set.update(camera, 600), true);
-    assert.deepEqual(a.group.children.map(node => node.name), ['r']);
-    assert.deepEqual(b.group.children.map(node => node.name), ['r', 'r0']);
+    assert.deepEqual(
+      a.group.children.map((node) => node.name),
+      ['r'],
+    );
+    assert.deepEqual(
+      b.group.children.map((node) => node.name),
+      ['r', 'r0'],
+    );
   } finally {
     a.dispose();
     b.dispose();
@@ -1602,10 +2059,16 @@ test('a cloud belongs to one set at a time, which updates it until it is removed
     assert.equal(set.remove(a), false);
     // A removed cloud keeps its nodes as they are while the set goes on.
     const camera = childViewCamera();
-    await waitFor(() => { set.update(camera, 600); return b.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return b.group.children.length === 2;
+    });
     assert.equal(a.group.children.length, 1);
     other.add(a);
-    await waitFor(() => { other.update(camera, 600); return a.group.children.length === 2; });
+    await waitFor(() => {
+      other.update(camera, 600);
+      return a.group.children.length === 2;
+    });
     b.dispose();
     assert.deepEqual(set.clouds, []);
   } finally {
@@ -1617,7 +2080,10 @@ test('a cloud belongs to one set at a time, which updates it until it is removed
 test('clouds share one decoder pool until the last one is disposed', async () => {
   const [a, b] = await loadChildClouds(2);
   const { fetcher } = flakyCloudFetcher(childFiles, {});
-  const c = await loadPotreeV2('https://example.test/cloud-c/metadata.json', { fetch: fetcher, decoderWorkers: 7 });
+  const c = await loadPotreeV2('https://example.test/cloud-c/metadata.json', {
+    fetch: fetcher,
+    decoderWorkers: 7,
+  });
   assert.equal(a.decoder, b.decoder);
   assert.equal(a.decoder, c.decoder);
   assert.equal(a.decoder.maxWorkers, 7);
@@ -1640,11 +2106,16 @@ test('a cloud set shares request slots and requests the most important cloud fir
     const holding = async (url, init) => {
       if (clouds.length === 2 && String(url).endsWith('octree.bin')) {
         octreeRequests.push(`${name} ${init.headers.Range}`);
-        await new Promise(resolve => held.push(resolve));
+        await new Promise((resolve) => held.push(resolve));
       }
       return fetcher(url, init);
     };
-    clouds.push(await loadPotreeV2(`https://example.test/${name}/metadata.json`, { fetch: holding, minNodePixelSize: 1 }));
+    clouds.push(
+      await loadPotreeV2(`https://example.test/${name}/metadata.json`, {
+        fetch: holding,
+        minNodePixelSize: 1,
+      }),
+    );
   }
   const [near, far] = clouds;
   const set = new PotreeV2PointCloudSet({ maxConcurrentLoads: 1 });
@@ -1658,10 +2129,16 @@ test('a cloud set shares request slots and requests the most important cloud fir
     await waitFor(() => octreeRequests.length === 1);
     assert.deepEqual(octreeRequests, ['near bytes=18-35']);
     held.shift()();
-    await waitFor(() => { set.update(camera, 600); return octreeRequests.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return octreeRequests.length === 2;
+    });
     assert.equal(octreeRequests[1], 'far bytes=18-35');
     held.shift()();
-    await waitFor(() => { set.update(camera, 600); return far.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return far.group.children.length === 2;
+    });
   } finally {
     near.dispose();
     far.dispose();
@@ -1690,21 +2167,27 @@ test('a cloud set installs the most important decoded nodes of any cloud first',
 });
 
 test('a cloud set caches the encoded nodes of its caching clouds in one budget', async () => {
-  const load = async (name, options) => loadPotreeV2(`https://example.test/${name}/metadata.json`, {
-    fetch: flakyCloudFetcher(childFiles, {}).fetcher, minNodePixelSize: 1, ...options,
-  });
+  const load = async (name, options) =>
+    loadPotreeV2(`https://example.test/${name}/metadata.json`, {
+      fetch: flakyCloudFetcher(childFiles, {}).fetcher,
+      minNodePixelSize: 1,
+      ...options,
+    });
   const a = await load('a', { cacheEncodedNodes: true });
   const b = await load('b', {}); // DEFAULT caches nothing unless asked.
   const c = await load('c', { cacheEncodedNodes: true });
   const set = new PotreeV2PointCloudSet({ encodedCacheByteBudget: 36 });
   try {
     assert.equal(set.encodedCacheByteBudget, 36);
-    assert.deepEqual([a, b, c].map(cloud => cloud.cacheEncodedNodes), [true, false, true]);
+    assert.deepEqual(
+      [a, b, c].map((cloud) => cloud.cacheEncodedNodes),
+      [true, false, true],
+    );
     for (const cloud of [a, b, c]) set.add(cloud);
     const camera = childViewCamera();
     await waitFor(() => {
       set.update(camera, 600);
-      return [a, b, c].every(cloud => cloud.group.children.length === 2);
+      return [a, b, c].every((cloud) => cloud.group.children.length === 2);
     });
     // One child of a and of c, 18 bytes each; b keeps none.
     assert.equal(set.encodedCache.size, 2);
@@ -1730,7 +2213,7 @@ test('bounding boxes of every cloud share one geometry and material until the la
       set.add(cloud);
     }
     set.update(camera, 600);
-    const box = cloud => cloud.group.children.find(child => child.isLineSegments);
+    const box = (cloud) => cloud.group.children.find((child) => child.isLineSegments);
     assert.ok(box(a) && box(b));
     assert.equal(box(a).geometry, box(b).geometry);
     assert.equal(box(a).material, box(b).material);
@@ -1758,7 +2241,10 @@ test('a cloud moved to another set selects again under its budget, even when equ
     await waitFor(() => !set.update(camera, 600) && b.group.children.length === 1 && b.settled);
     set.remove(b);
     const alone = display(b, { pointBudget: 2 });
-    await waitFor(() => { alone.update(camera, 600); return b.group.children.length === 2; });
+    await waitFor(() => {
+      alone.update(camera, 600);
+      return b.group.children.length === 2;
+    });
   } finally {
     a.dispose();
     b.dispose();
@@ -1768,7 +2254,10 @@ test('a cloud moved to another set selects again under its budget, even when equ
 test('a cloud whose options fail to build its material keeps no decoder Workers', async () => {
   const { fetcher } = flakyCloudFetcher(childFiles, {});
   await assert.rejects(
-    loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, material: { gradient: [] } }),
+    loadPotreeV2('https://example.test/cloud/metadata.json', {
+      fetch: fetcher,
+      material: { gradient: [] },
+    }),
     /at least one stop/,
   );
   const pool = DecoderPool.acquire(1);
@@ -1787,11 +2276,16 @@ test('update follows a camera whose parent moved since the last render', async (
     const camera = childViewCamera();
     rig.add(camera);
     rig.updateMatrixWorld();
-    await waitFor(() => !set.update(camera, 600) && cloud.group.children.length === 2 && cloud.settled);
+    await waitFor(
+      () => !set.update(camera, 600) && cloud.group.children.length === 2 && cloud.settled,
+    );
     // Moved, but not rendered yet: the matrices of the rig are stale.
     rig.position.x = 1000;
     assert.equal(set.update(camera, 600), true);
-    assert.deepEqual(cloud.group.children.map(node => node.visible), [false, false]);
+    assert.deepEqual(
+      cloud.group.children.map((node) => node.visible),
+      [false, false],
+    );
   } finally {
     cloud.dispose();
   }
@@ -1800,7 +2294,9 @@ test('update follows a camera whose parent moved since the last render', async (
 test('a cloud copies no payloads for a cache when its set disables the encoded cache', async () => {
   const { fetcher } = flakyCloudFetcher(childFiles, {});
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1, cacheEncodedNodes: true,
+    fetch: fetcher,
+    minNodePixelSize: 1,
+    cacheEncodedNodes: true,
   });
   const set = new PotreeV2PointCloudSet({ encodedCacheByteBudget: 0 });
   set.add(cloud);
@@ -1812,7 +2308,10 @@ test('a cloud copies no payloads for a cache when its set disables the encoded c
   };
   try {
     const camera = childViewCamera();
-    await waitFor(() => { set.update(camera, 600); return cloud.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return cloud.group.children.length === 2;
+    });
     assert.deepEqual(slices, []);
     assert.equal(set.encodedCache.size, 0);
   } finally {
@@ -1826,10 +2325,13 @@ test('an aborted signal rejects the load with its reason before any request', as
   const reason = new Error('page closed');
   await assert.rejects(
     loadPotreeV2('https://example.test/cloud/metadata.json', {
-      fetch: async url => { requests.push(String(url)); throw new Error('unexpected request'); },
+      fetch: async (url) => {
+        requests.push(String(url));
+        throw new Error('unexpected request');
+      },
       signal: AbortSignal.abort(reason),
     }),
-    error => error === reason,
+    (error) => error === reason,
   );
   assert.deepEqual(requests, []);
 });
@@ -1838,10 +2340,11 @@ test('aborting the signal abandons a pending metadata request', async () => {
   const controller = new AbortController();
   let metadataSignal;
   const load = loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: (url, init) => new Promise((resolve, reject) => {
-      metadataSignal = init.signal;
-      init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
-    }),
+    fetch: (url, init) =>
+      new Promise((resolve, reject) => {
+        metadataSignal = init.signal;
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+      }),
     signal: controller.signal,
   });
   await waitFor(() => metadataSignal !== undefined);
@@ -1867,7 +2370,7 @@ test('aborting the signal during the root load disposes the cloud and keeps no d
   });
   await waitFor(() => octreeSignal !== undefined);
   controller.abort(reason);
-  await assert.rejects(load, error => error === reason);
+  await assert.rejects(load, (error) => error === reason);
   assert.equal(octreeSignal.aborted, true);
   const pool = DecoderPool.acquire(1);
   try {
@@ -1881,13 +2384,18 @@ test('aborting the signal after the load resolved leaves the cloud loading', asy
   const { fetcher } = flakyCloudFetcher(childFiles, {});
   const controller = new AbortController();
   const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
-    fetch: fetcher, minNodePixelSize: 1, signal: controller.signal,
+    fetch: fetcher,
+    minNodePixelSize: 1,
+    signal: controller.signal,
   });
   const set = display(cloud);
   try {
     controller.abort();
     const camera = childViewCamera();
-    await waitFor(() => { set.update(camera, 600); return cloud.group.children.length === 2; });
+    await waitFor(() => {
+      set.update(camera, 600);
+      return cloud.group.children.length === 2;
+    });
   } finally {
     cloud.dispose();
   }
@@ -1896,14 +2404,27 @@ test('aborting the signal after the load resolved leaves the cloud loading', asy
 /** Call update() like a render loop until `promise` settles. */
 async function updateUntil(promise, update) {
   let done = false;
-  promise.then(() => { done = true; }, () => { done = true; });
-  await waitFor(() => { if (!done) update(); return done; });
+  promise.then(
+    () => {
+      done = true;
+    },
+    () => {
+      done = true;
+    },
+  );
+  await waitFor(() => {
+    if (!done) update();
+    return done;
+  });
   return promise;
 }
 
 test('whenLoaded resolves at the update that finds the selected nodes in the scene', async () => {
   const { fetcher } = flakyCloudFetcher(childFiles, {});
-  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, minNodePixelSize: 1 });
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher,
+    minNodePixelSize: 1,
+  });
   const set = display(cloud);
   try {
     assert.equal(cloud.loading, true);
@@ -1914,8 +2435,10 @@ test('whenLoaded resolves at the update that finds the selected nodes in the sce
 
     // Settled already, but it still waits for the next update.
     let resolved = false;
-    const next = cloud.whenLoaded().then(() => { resolved = true; });
-    await new Promise(resolve => setTimeout(resolve, 10));
+    const next = cloud.whenLoaded().then(() => {
+      resolved = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(resolved, false);
     set.update(camera, 600);
     await next;
@@ -1932,19 +2455,22 @@ test('whenLoaded resolves at the update that finds the selected nodes in the sce
 
 test('whenLoaded rejects on dispose and when its signal aborts', async () => {
   const { fetcher } = flakyCloudFetcher(childFiles, {});
-  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, minNodePixelSize: 1 });
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher,
+    minNodePixelSize: 1,
+  });
   const controller = new AbortController();
   const reason = new Error('cancelled');
   const aborted = cloud.whenLoaded({ signal: controller.signal });
   controller.abort(reason);
-  await assert.rejects(aborted, error => error === reason);
+  await assert.rejects(aborted, (error) => error === reason);
   const pending = cloud.whenLoaded();
   cloud.dispose();
   await assert.rejects(pending, { name: 'AbortError' });
   await assert.rejects(cloud.whenLoaded(), { name: 'AbortError' });
 });
 
-test('a set is loading until every cloud is, and whenLoaded resolves at the set\'s update', async () => {
+test("a set is loading until every cloud is, and whenLoaded resolves at the set's update", async () => {
   const clouds = await loadChildClouds(2);
   const set = new PotreeV2PointCloudSet();
   try {
@@ -1956,7 +2482,10 @@ test('a set is loading until every cloud is, and whenLoaded resolves at the set\
     await updateUntil(set.whenLoaded(), () => set.update(camera, 600));
     await cloudLoaded;
     assert.equal(set.loading, false);
-    assert.deepEqual(clouds.map(cloud => cloud.group.children.length), [2, 2]);
+    assert.deepEqual(
+      clouds.map((cloud) => cloud.group.children.length),
+      [2, 2],
+    );
   } finally {
     for (const cloud of clouds) cloud.dispose();
   }

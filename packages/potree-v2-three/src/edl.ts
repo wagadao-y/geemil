@@ -1,6 +1,16 @@
 import {
-  Color, DepthTexture, FloatType, HalfFloatType, Mesh, NearestFilter, OrthographicCamera, PlaneGeometry,
-  ShaderMaterial, Vector2, Vector4, WebGLRenderTarget,
+  Color,
+  DepthTexture,
+  FloatType,
+  HalfFloatType,
+  Mesh,
+  NearestFilter,
+  OrthographicCamera,
+  PlaneGeometry,
+  ShaderMaterial,
+  Vector2,
+  Vector4,
+  WebGLRenderTarget,
 } from 'three';
 import type { Camera, Object3D, Scene, WebGLRenderer } from 'three';
 import { restoreViewport } from './viewport.js';
@@ -14,14 +24,14 @@ export interface PotreeV2EDLOptions {
 
 const NEIGHBOURS = 8;
 
-const vertexShader = /* glsl */`
+const vertexShader = /* glsl */ `
 varying vec2 vUv;
 void main() {
   vUv = uv;
   gl_Position = vec4(position.xy, 0.0, 1.0);
 }`;
 
-const fragmentShader = /* glsl */`
+const fragmentShader = /* glsl */ `
 #include <common>
 #include <packing>
 uniform sampler2D colorTexture;
@@ -78,11 +88,15 @@ export class PotreeV2EDL {
   radius: number;
 
   private readonly target = new WebGLRenderTarget(1, 1, {
-    type: HalfFloatType, minFilter: NearestFilter, magFilter: NearestFilter, generateMipmaps: false,
+    type: HalfFloatType,
+    minFilter: NearestFilter,
+    magFilter: NearestFilter,
+    generateMipmaps: false,
     depthTexture: new DepthTexture(1, 1, FloatType),
   });
   private readonly material = new ShaderMaterial({
-    vertexShader, fragmentShader,
+    vertexShader,
+    fragmentShader,
     uniforms: {
       colorTexture: { value: this.target.texture },
       depthTexture: { value: this.target.depthTexture },
@@ -92,8 +106,14 @@ export class PotreeV2EDL {
       cameraNear: { value: 0.1 },
       cameraFar: { value: 1000 },
       neighbours: {
-        value: Array.from({ length: NEIGHBOURS }, (_, i) =>
-          new Vector2(Math.cos(2 * Math.PI * i / NEIGHBOURS), Math.sin(2 * Math.PI * i / NEIGHBOURS))),
+        value: Array.from(
+          { length: NEIGHBOURS },
+          (_, i) =>
+            new Vector2(
+              Math.cos((2 * Math.PI * i) / NEIGHBOURS),
+              Math.sin((2 * Math.PI * i) / NEIGHBOURS),
+            ),
+        ),
       },
     },
     depthTest: true,
@@ -117,8 +137,13 @@ export class PotreeV2EDL {
    * Render `scene` with EDL on the `clouds` (their `group`s must be in `scene`) into the
    * renderer's current target and viewport. `renderer.autoClear` applies to the scene as usual.
    */
-  render(renderer: WebGLRenderer, scene: Scene, camera: Camera, clouds: Iterable<{ group: Object3D }>): void {
-    const groups = [...clouds].map(cloud => cloud.group).filter(group => group.visible);
+  render(
+    renderer: WebGLRenderer,
+    scene: Scene,
+    camera: Camera,
+    clouds: Iterable<{ group: Object3D }>,
+  ): void {
+    const groups = [...clouds].map((cloud) => cloud.group).filter((group) => group.visible);
     const output = renderer.getRenderTarget();
     const viewport = renderer.getCurrentViewport(this.viewport);
     this.size.set(viewport.z, viewport.w);
@@ -175,7 +200,8 @@ export class PotreeV2EDL {
   private isolate(groups: Object3D[]): void {
     const keep = new Set<Object3D>();
     for (const group of groups) {
-      for (let object: Object3D | null = group; object && !keep.has(object); object = object.parent) keep.add(object);
+      for (let object: Object3D | null = group; object && !keep.has(object); object = object.parent)
+        keep.add(object);
     }
     const inside = new Set(groups);
     for (const object of keep) {
@@ -196,8 +222,10 @@ export class PotreeV2EDL {
       EDL_PERSPECTIVE: perspective ? '' : false,
       EDL_LOG_DEPTH: logDepth ? '' : false,
     } as Record<string, string | false>;
-    if (this.material.defines.EDL_PERSPECTIVE !== defines.EDL_PERSPECTIVE ||
-      this.material.defines.EDL_LOG_DEPTH !== defines.EDL_LOG_DEPTH) {
+    if (
+      this.material.defines.EDL_PERSPECTIVE !== defines.EDL_PERSPECTIVE ||
+      this.material.defines.EDL_LOG_DEPTH !== defines.EDL_LOG_DEPTH
+    ) {
       this.material.defines = { ...this.material.defines, ...defines };
       this.material.needsUpdate = true;
     }

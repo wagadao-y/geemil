@@ -1,6 +1,16 @@
 import {
-  BoxGeometry, Camera, EdgesGeometry, Frustum, Group, LineBasicMaterial,
-  LineSegments, Matrix4, Object3D, Points, Sphere, Vector3,
+  BoxGeometry,
+  Camera,
+  EdgesGeometry,
+  Frustum,
+  Group,
+  LineBasicMaterial,
+  LineSegments,
+  Matrix4,
+  Object3D,
+  Points,
+  Sphere,
+  Vector3,
 } from 'three';
 import type { Box3, OrthographicCamera, PerspectiveCamera, WebGLRenderer } from 'three';
 import { attributeNormalization, DEFAULT_DECODED_ATTRIBUTES, nodeOrigin } from './decode.js';
@@ -25,7 +35,13 @@ import type { PotreeV2PointColorType } from './point-color.js';
 import { pointOccupancy } from './occupancy.js';
 import { nodeExtent, occupancyLevelOffset, VisibleNodesTexture } from './point-size.js';
 import {
-  appendClippingKey, clipBoxCount, clipNode, grownCapacity, NO_CLIP, sameKey, snapshotClipping,
+  appendClippingKey,
+  clipBoxCount,
+  clipNode,
+  grownCapacity,
+  NO_CLIP,
+  sameKey,
+  snapshotClipping,
 } from './clipping.js';
 import type { ClipSnapshot, NodeClip, PotreeV2Clipping } from './clipping.js';
 
@@ -149,13 +165,29 @@ export interface PotreeV2PickResult {
 
 function emptyDiagnostics(): PotreeV2LoadDiagnostics {
   return {
-    state: 'loading', seconds: 0, requiredNodes: 0, decodedNodes: 0,
-    pendingSceneNodes: 0, decodedReadySeconds: null, sceneReadySeconds: null,
-    lastSceneConversionSeconds: null, sceneConversions: 0, startedBatches: 0,
-    completedBatches: 0, loadedNodes: 0, activeBatches: 0,
-    lastBatchDoneSeconds: null, hierarchyStarted: 0, hierarchyCompleted: 0,
-    hierarchyMs: 0, fetchMs: 0, codecSetupMs: 0, brotliMs: 0,
-    attributesMs: 0, fetchedBytes: 0, throttledResponses: 0,
+    state: 'loading',
+    seconds: 0,
+    requiredNodes: 0,
+    decodedNodes: 0,
+    pendingSceneNodes: 0,
+    decodedReadySeconds: null,
+    sceneReadySeconds: null,
+    lastSceneConversionSeconds: null,
+    sceneConversions: 0,
+    startedBatches: 0,
+    completedBatches: 0,
+    loadedNodes: 0,
+    activeBatches: 0,
+    lastBatchDoneSeconds: null,
+    hierarchyStarted: 0,
+    hierarchyCompleted: 0,
+    hierarchyMs: 0,
+    fetchMs: 0,
+    codecSetupMs: 0,
+    brotliMs: 0,
+    attributesMs: 0,
+    fetchedBytes: 0,
+    throttledResponses: 0,
     abortedRequests: 0,
   };
 }
@@ -193,22 +225,35 @@ function defaultDecoderWorkers(): number {
   return Math.min(4, Math.max(1, (cores ?? 4) - 1));
 }
 
-function resolveDecodedAttributes(metadata: PotreeV2Metadata, requested?: string[], colorType?: PotreeV2PointColorType): string[] {
-  const available = new Set(metadata.attributes.map(a => a.name));
+function resolveDecodedAttributes(
+  metadata: PotreeV2Metadata,
+  requested?: string[],
+  colorType?: PotreeV2PointColorType,
+): string[] {
+  const available = new Set(metadata.attributes.map((a) => a.name));
   const colorAttribute = colorType && colorTypeAttribute(colorType);
-  for (const name of [...requested ?? [], ...colorAttribute ? [colorAttribute] : []]) {
+  for (const name of [...(requested ?? []), ...(colorAttribute ? [colorAttribute] : [])]) {
     if (!available.has(name)) throw new Error(`Potree v2 metadata has no attribute: ${name}`);
   }
-  const names = new Set(['position', ...(requested ?? DEFAULT_DECODED_ATTRIBUTES), ...colorAttribute ? [colorAttribute] : []]);
-  return [...names].filter(name => available.has(name));
+  const names = new Set([
+    'position',
+    ...(requested ?? DEFAULT_DECODED_ATTRIBUTES),
+    ...(colorAttribute ? [colorAttribute] : []),
+  ]);
+  return [...names].filter((name) => available.has(name));
 }
 
 function defaultIntensityRange(metadata: PotreeV2Metadata): [number, number] {
-  const attribute = metadata.attributes.find(a => a.name === 'intensity');
+  const attribute = metadata.attributes.find((a) => a.name === 'intensity');
   const min = attribute?.min?.[0];
   const max = attribute?.max?.[0];
-  return min !== undefined && max !== undefined && Number.isFinite(min) && Number.isFinite(max) && max > min
-    ? [min, max] : [0, 65535];
+  return min !== undefined &&
+    max !== undefined &&
+    Number.isFinite(min) &&
+    Number.isFinite(max) &&
+    max > min
+    ? [min, max]
+    : [0, 65535];
 }
 
 /** One cloud's part of an update that may traverse several clouds together. */
@@ -269,7 +314,10 @@ export interface UpdateLimits {
 }
 
 /** PotreeV2PointCloud's private loader, for loadPotreeV2(). */
-let loadPointCloud: (metadataUrl: string | URL, options: PotreeV2Options) => Promise<PotreeV2PointCloud>;
+let loadPointCloud: (
+  metadataUrl: string | URL,
+  options: PotreeV2Options,
+) => Promise<PotreeV2PointCloud>;
 
 /**
  * Select, load and evict nodes of `clouds` under `limits`. `force` traverses even
@@ -277,7 +325,11 @@ let loadPointCloud: (metadataUrl: string | URL, options: PotreeV2Options) => Pro
  * @internal
  */
 export let updatePointClouds: (
-  clouds: readonly PotreeV2PointCloud[], camera: Camera, viewportHeight: number, limits: UpdateLimits, force: boolean,
+  clouds: readonly PotreeV2PointCloud[],
+  camera: Camera,
+  viewportHeight: number,
+  limits: UpdateLimits,
+  force: boolean,
 ) => boolean;
 
 /**
@@ -285,16 +337,27 @@ export let updatePointClouds: (
  * @internal
  */
 export let pickPointClouds: (
-  clouds: readonly PotreeV2PointCloud[], renderer: WebGLRenderer, camera: Camera, x: number, y: number,
+  clouds: readonly PotreeV2PointCloud[],
+  renderer: WebGLRenderer,
+  camera: Camera,
+  x: number,
+  y: number,
   options: PotreeV2PickOptions,
 ) => Promise<PotreeV2PickResult | null>;
 
 /** A decoded node waiting for installation; `rank` is scratch space for installDecodedNodes. */
-type DecodedQueueItem = { node: OctreeNode; attributes: DecodedNodeData; occupancy?: number; rank: number };
+type DecodedQueueItem = {
+  node: OctreeNode;
+  attributes: DecodedNodeData;
+  occupancy?: number;
+  rank: number;
+};
 
 /** An octree batch a cloud could request now; `rank` orders plans across clouds. */
 type BatchPlan = {
-  cloud: PotreeV2PointCloud; nodes: OctreeNode[]; rank: number;
+  cloud: PotreeV2PointCloud;
+  nodes: OctreeNode[];
+  rank: number;
   /** Decoded from the encoded cache as one job, without a request. Otherwise one octree range. */
   cached: boolean;
 };
@@ -312,9 +375,13 @@ type BatchRequest = { nodes: OctreeNode[]; controller: AbortController; wantedAt
 class CandidateHeap {
   private readonly items: Candidate[] = [];
 
-  get size(): number { return this.items.length; }
+  get size(): number {
+    return this.items.length;
+  }
 
-  clear(): void { this.items.length = 0; }
+  clear(): void {
+    this.items.length = 0;
+  }
 
   push(item: Candidate): void {
     let index = this.items.length;
@@ -335,7 +402,11 @@ class CandidateHeap {
     let index = 0;
     while (index * 2 + 1 < this.items.length) {
       let child = index * 2 + 1;
-      if (child + 1 < this.items.length && this.items[child + 1]!.pixels > this.items[child]!.pixels) child++;
+      if (
+        child + 1 < this.items.length &&
+        this.items[child + 1]!.pixels > this.items[child]!.pixels
+      )
+        child++;
       if (last.pixels >= this.items[child]!.pixels) break;
       this.items[index] = this.items[child]!;
       index = child;
@@ -360,7 +431,12 @@ function acquireBoxResources(): BoxResources {
     // must write depth even when Three.js sorts their material before points.
     boxResources = {
       geometry: new EdgesGeometry(unitBox),
-      material: new LineBasicMaterial({ color: 0x58dfd2, toneMapped: false, depthTest: true, depthWrite: true }),
+      material: new LineBasicMaterial({
+        color: 0x58dfd2,
+        toneMapped: false,
+        depthTest: true,
+        depthWrite: true,
+      }),
       references: 0,
     };
     unitBox.dispose();
@@ -468,28 +544,44 @@ export class PotreeV2PointCloud {
 
   private constructor(url: URL, metadata: PotreeV2Metadata, options: PotreeV2Options) {
     const material = options.material ?? {};
-    this.decodedAttributes = resolveDecodedAttributes(metadata, options.attributes, material.colorType);
+    this.decodedAttributes = resolveDecodedAttributes(
+      metadata,
+      options.attributes,
+      material.colorType,
+    );
     this.metadataUrl = url;
     this.metadata = metadata;
     this.root = createRoot(metadata);
     this.fetcher = options.fetch ?? fetch;
     this.cachesEncodedNodes = options.cacheEncodedNodes ?? metadata.encoding === 'BROTLI';
     this.minNodePixelSize = options.minNodePixelSize ?? 30;
-    this.decoderWorkers = Math.max(1, Math.floor(options.decoderWorkers ?? defaultDecoderWorkers()));
+    this.decoderWorkers = Math.max(
+      1,
+      Math.floor(options.decoderWorkers ?? defaultDecoderWorkers()),
+    );
     this.showBoundingBoxes = options.showBoundingBoxes ?? false;
     this.clipping = options.clipping ?? null;
     this.retryDelayMs = Math.max(0, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS);
     this.gate = RequestGate.for(url);
     this.onError = options.onError;
-    this.material = new PotreeV2PointMaterial({
-      ...material,
-      colorType: material.colorType ?? (this.decodedAttributes.includes('rgb') ? 'rgb' : 'elevation'),
-      elevationRange: material.elevationRange ?? [metadata.boundingBox.min[2], metadata.boundingBox.max[2]],
-      intensityRange: material.intensityRange ?? defaultIntensityRange(metadata),
-    }, {
-      spacing: metadata.spacing, visibleNodes: this.visibleNodes, attributes: this.decodedAttributes,
-      sourceOriginZ: metadata.boundingBox.min[2],
-    });
+    this.material = new PotreeV2PointMaterial(
+      {
+        ...material,
+        colorType:
+          material.colorType ?? (this.decodedAttributes.includes('rgb') ? 'rgb' : 'elevation'),
+        elevationRange: material.elevationRange ?? [
+          metadata.boundingBox.min[2],
+          metadata.boundingBox.max[2],
+        ],
+        intensityRange: material.intensityRange ?? defaultIntensityRange(metadata),
+      },
+      {
+        spacing: metadata.spacing,
+        visibleNodes: this.visibleNodes,
+        attributes: this.decodedAttributes,
+        sourceOriginZ: metadata.boundingBox.min[2],
+      },
+    );
     this.group.name = metadata.name ?? 'Potree v2 point cloud';
     // Last, so that options rejected above, such as an empty gradient, leave no Workers behind.
     this.decoder = DecoderPool.acquire(this.decoderWorkers);
@@ -501,16 +593,22 @@ export class PotreeV2PointCloud {
    * The octree's bounding box in `group`'s local space, from the origin to the size of
    * metadata.json's bounding box. A new copy on each call.
    */
-  get boundingBox(): Box3 { return this.root.box.clone(); }
+  get boundingBox(): Box3 {
+    return this.root.box.clone();
+  }
 
   /** metadata.json position of `group`'s local origin, the bounding box minimum. A new copy on each call. */
-  get worldOffset(): Vector3 { return new Vector3(...this.metadata.boundingBox.min); }
+  get worldOffset(): Vector3 {
+    return new Vector3(...this.metadata.boundingBox.min);
+  }
 
   /**
    * Whether this cloud keeps octree payloads in its set's encoded cache; see the option of the
    * same name. Setting false drops its entries there.
    */
-  get cacheEncodedNodes(): boolean { return this.cachesEncodedNodes; }
+  get cacheEncodedNodes(): boolean {
+    return this.cachesEncodedNodes;
+  }
   set cacheEncodedNodes(value: boolean) {
     this.cachesEncodedNodes = value;
     if (!value) cloudSets.get(this)?.encodedCache.deleteOwner(this);
@@ -534,7 +632,9 @@ export class PotreeV2PointCloud {
   }
 
   /** Cumulative successful octree range loads since construction or the last clear. Unstable, see PotreeV2FetchStats. */
-  get fetchStats(): PotreeV2FetchStats { return { ...this.fetchStatsState }; }
+  get fetchStats(): PotreeV2FetchStats {
+    return { ...this.fetchStatsState };
+  }
 
   /** Reset counters without counting batches already in progress. */
   clearFetchStats(): void {
@@ -545,9 +645,10 @@ export class PotreeV2PointCloud {
 
   /** Timings for the current view load, including Worker decode and scene installation. Unstable, see PotreeV2LoadDiagnostics. */
   get loadDiagnostics(): PotreeV2LoadDiagnostics {
-    const seconds = this.diagnosticsState.state === 'loading'
-      ? (performance.now() - this.diagnosticsStartedAt) / 1000
-      : this.diagnosticsState.seconds;
+    const seconds =
+      this.diagnosticsState.state === 'loading'
+        ? (performance.now() - this.diagnosticsStartedAt) / 1000
+        : this.diagnosticsState.seconds;
     return { ...this.diagnosticsState, seconds, activeBatches: this.activeDecodeBatches };
   }
 
@@ -570,7 +671,9 @@ export class PotreeV2PointCloud {
    * failing keeps it true; see onError. A hidden cloud selects nothing, so it is loaded at once.
    * False once disposed.
    */
-  get loading(): boolean { return !this.disposed && !this.settled; }
+  get loading(): boolean {
+    return !this.disposed && !this.settled;
+  }
 
   /**
    * Resolves at the end of the next update() of its set after which `loading` is
@@ -579,11 +682,15 @@ export class PotreeV2PointCloud {
    * with the signal's reason when `signal` aborts, and with an AbortError on dispose().
    */
   whenLoaded(options: { signal?: AbortSignal } = {}): Promise<void> {
-    if (this.disposed) return Promise.reject(new DOMException('The point cloud was disposed', 'AbortError'));
+    if (this.disposed)
+      return Promise.reject(new DOMException('The point cloud was disposed', 'AbortError'));
     return this.loadWaiters.wait(options.signal);
   }
 
-  private static async load(metadataUrl: string | URL, options: PotreeV2Options = {}): Promise<PotreeV2PointCloud> {
+  private static async load(
+    metadataUrl: string | URL,
+    options: PotreeV2Options = {},
+  ): Promise<PotreeV2PointCloud> {
     const url = new URL(String(metadataUrl), globalThis.location?.href);
     const fetcher = options.fetch ?? fetch;
     const gate = RequestGate.for(url);
@@ -592,11 +699,22 @@ export class PotreeV2PointCloud {
     abortSignal?.throwIfAborted();
     let metadata: PotreeV2Metadata;
     try {
-      metadata = validateMetadata(await gate.retry(() => gate.request(async () => {
-        const response = await fetcher(url, { signal: abortSignal });
-        if (!response.ok) throw await responseError(url, response);
-        return response.json() as Promise<unknown>;
-      }, retryDelayMs, abortSignal), LOAD_ATTEMPTS, abortSignal));
+      metadata = validateMetadata(
+        await gate.retry(
+          () =>
+            gate.request(
+              async () => {
+                const response = await fetcher(url, { signal: abortSignal });
+                if (!response.ok) throw await responseError(url, response);
+                return response.json() as Promise<unknown>;
+              },
+              retryDelayMs,
+              abortSignal,
+            ),
+          LOAD_ATTEMPTS,
+          abortSignal,
+        ),
+      );
     } catch (error) {
       // The gate's own waits reject with a plain AbortError; report the caller's reason.
       abortSignal?.throwIfAborted();
@@ -610,12 +728,16 @@ export class PotreeV2PointCloud {
     try {
       await gate.retry(() => cloud.loadHierarchy(cloud.root), LOAD_ATTEMPTS, signal);
       if (cloud.root.numPoints > 0) {
-        await gate.retry(async () => {
-          // Like update()'s batches, wait for room in the shared decoder backlog first.
-          await cloud.waitForDecoderRoom(signal);
-          const [failure] = await cloud.loadBatch([cloud.root]);
-          if (failure) throw failure.error;
-        }, LOAD_ATTEMPTS, signal);
+        await gate.retry(
+          async () => {
+            // Like update()'s batches, wait for room in the shared decoder backlog first.
+            await cloud.waitForDecoderRoom(signal);
+            const [failure] = await cloud.loadBatch([cloud.root]);
+            if (failure) throw failure.error;
+          },
+          LOAD_ATTEMPTS,
+          signal,
+        );
         PotreeV2PointCloud.installDecodedNodes([cloud], Infinity);
       }
       abortSignal?.throwIfAborted();
@@ -640,7 +762,8 @@ export class PotreeV2PointCloud {
 
   /** Drop a state that no longer carries scene, load, queue or retry information. */
   private releaseState(node: OctreeNode, state: NodeState): void {
-    if (state.points || state.boxHelper || state.loading || state.queued || state.failures > 0) return;
+    if (state.points || state.boxHelper || state.loading || state.queued || state.failures > 0)
+      return;
     if (this.states.get(node) === state) this.states.delete(node);
   }
 
@@ -650,7 +773,8 @@ export class PotreeV2PointCloud {
 
   private noteFailure(state: NodeState): void {
     state.failures++;
-    state.retryAt = performance.now() +
+    state.retryAt =
+      performance.now() +
       Math.min(this.retryDelayMs * 2 ** (state.failures - 1), MAX_RETRY_DELAY_MS);
   }
 
@@ -663,7 +787,9 @@ export class PotreeV2PointCloud {
     try {
       this.onError?.(error instanceof Error ? error : new Error(String(error)), node);
     } catch (thrown) {
-      queueMicrotask(() => { throw thrown; });
+      queueMicrotask(() => {
+        throw thrown;
+      });
     }
   }
 
@@ -672,7 +798,11 @@ export class PotreeV2PointCloud {
     const generation = this.diagnosticsGeneration;
     const startedAt = performance.now();
     this.diagnosticsState.hierarchyStarted++;
-    const data = await this.fetchBytes('hierarchy.bin', node.hierarchyByteOffset, node.hierarchyByteSize);
+    const data = await this.fetchBytes(
+      'hierarchy.bin',
+      node.hierarchyByteOffset,
+      node.hierarchyByteSize,
+    );
     if (!this.disposed) parseHierarchyChunk(node, data);
     if (!this.disposed && generation === this.diagnosticsGeneration) {
       this.diagnosticsState.hierarchyCompleted++;
@@ -682,12 +812,17 @@ export class PotreeV2PointCloud {
 
   /** Fetch one byte range through the origin's gate. */
   private async fetchBytes(
-    file: 'hierarchy.bin' | 'octree.bin', offset: bigint, size: bigint, signal = this.controller.signal,
+    file: 'hierarchy.bin' | 'octree.bin',
+    offset: bigint,
+    size: bigint,
+    signal = this.controller.signal,
   ): Promise<ArrayBuffer> {
     try {
-      return await this.gate.request(() => fetchRange(
-        new URL(file, this.metadataUrl), offset, size, this.fetcher, signal,
-      ), this.retryDelayMs, signal);
+      return await this.gate.request(
+        () => fetchRange(new URL(file, this.metadataUrl), offset, size, this.fetcher, signal),
+        this.retryDelayMs,
+        signal,
+      );
     } catch (error) {
       if (isThrottled(error) && !this.disposed) this.diagnosticsState.throttledResponses++;
       throw error;
@@ -734,7 +869,9 @@ export class PotreeV2PointCloud {
    * the other nodes are queued for installation even when some failed.
    */
   private async loadBatch(
-    nodes: OctreeNode[], onFetched?: () => void, signal?: AbortSignal,
+    nodes: OctreeNode[],
+    onFetched?: () => void,
+    signal?: AbortSignal,
   ): Promise<{ nodes: OctreeNode[]; error: unknown }[]> {
     if (this.disposed || nodes.length === 0) {
       onFetched?.();
@@ -751,13 +888,16 @@ export class PotreeV2PointCloud {
     const batches = makeNodeBatches(missing);
     let fetching = batches.length;
     if (fetching === 0) onFetched?.();
-    const fetched = () => { if (--fetching === 0) onFetched?.(); };
+    const fetched = () => {
+      if (--fetching === 0) onFetched?.();
+    };
     // Each task's results follow the order of its node list.
-    const taskNodes = batches.map(batch => batch.nodes);
-    const tasks: Promise<DecodedBatchNode[]>[] =
-      batches.map(batch => this.fetchAndDecodeBatch(batch, diagnosticsGeneration, fetched, signal));
+    const taskNodes = batches.map((batch) => batch.nodes);
+    const tasks: Promise<DecodedBatchNode[]>[] = batches.map((batch) =>
+      this.fetchAndDecodeBatch(batch, diagnosticsGeneration, fetched, signal),
+    );
     if (cached.length > 0) {
-      taskNodes.push(cached.map(item => item.node));
+      taskNodes.push(cached.map((item) => item.node));
       tasks.push(this.decodeCachedNodes(cached, diagnosticsGeneration));
     }
     // Wait for every task, so a failed range neither discards the others' nodes nor
@@ -774,24 +914,37 @@ export class PotreeV2PointCloud {
       const decoded = result.value;
       const unexpected = decoded.find((item, index) => expected[index]?.name !== item.name);
       if (unexpected) {
-        failures.push({ nodes: expected, error: new Error(`Unexpected decoded node ${unexpected.name}`) });
+        failures.push({
+          nodes: expected,
+          error: new Error(`Unexpected decoded node ${unexpected.name}`),
+        });
         continue;
       }
       for (const [index, item] of decoded.entries()) {
         const node = expected[index]!;
         this.state(node).queued = true;
-        this.decodedQueue.push({ node, attributes: item.attributes, occupancy: item.occupancy, rank: 0 });
+        this.decodedQueue.push({
+          node,
+          attributes: item.attributes,
+          occupancy: item.occupancy,
+          rank: 0,
+        });
       }
     }
     return failures;
   }
 
-  private async fetchAndDecodeBatch(batch: NodeBatch, diagnosticsGeneration: number,
-    onFetched: () => void, signal?: AbortSignal): Promise<DecodedBatchNode[]> {
+  private async fetchAndDecodeBatch(
+    batch: NodeBatch,
+    diagnosticsGeneration: number,
+    onFetched: () => void,
+    signal?: AbortSignal,
+  ): Promise<DecodedBatchNode[]> {
     const statsGeneration = this.fetchStatsGeneration;
     const startedAt = performance.now();
     this.activeDecodeBatches++;
-    if (diagnosticsGeneration === this.diagnosticsGeneration) this.diagnosticsState.startedBatches++;
+    if (diagnosticsGeneration === this.diagnosticsGeneration)
+      this.diagnosticsState.startedBatches++;
     try {
       let bytes: ArrayBuffer;
       try {
@@ -806,18 +959,27 @@ export class PotreeV2PointCloud {
       }
       // The batch buffer is transferred to the Worker. Keep only selected node
       // ranges, copied before the transfer, so gaps do not consume cache space.
-      const encoded = this.encodedCache ? batch.nodes.map(node => {
-        const at = Number(node.byteOffset - batch.start);
-        return bytes.slice(at, at + Number(node.byteSize));
-      }) : [];
+      const encoded = this.encodedCache
+        ? batch.nodes.map((node) => {
+            const at = Number(node.byteOffset - batch.start);
+            return bytes.slice(at, at + Number(node.byteSize));
+          })
+        : [];
       const decoded = await this.liveDecoder().decodeBatch(
-        bytes, batch.start,
-        batch.nodes.map(node => ({
-          name: node.name, pointCount: node.numPoints, offset: node.byteOffset, size: node.byteSize,
-          origin: nodeOrigin(node), extent: nodeExtent(node.box),
+        bytes,
+        batch.start,
+        batch.nodes.map((node) => ({
+          name: node.name,
+          pointCount: node.numPoints,
+          offset: node.byteOffset,
+          size: node.byteSize,
+          origin: nodeOrigin(node),
+          extent: nodeExtent(node.box),
         })),
-        this.metadata, timing => this.noteDecodeTiming(timing, diagnosticsGeneration),
-        this.decodedAttributes, this.controller.signal,
+        this.metadata,
+        (timing) => this.noteDecodeTiming(timing, diagnosticsGeneration),
+        this.decodedAttributes,
+        this.controller.signal,
       );
       // Cached only once decoded, so that bytes which fail to decode are fetched again on retry.
       const cache = this.disposed ? undefined : this.encodedCache;
@@ -833,7 +995,8 @@ export class PotreeV2PointCloud {
       if (!this.disposed && diagnosticsGeneration === this.diagnosticsGeneration) {
         this.diagnosticsState.completedBatches++;
         this.diagnosticsState.loadedNodes += batch.nodes.length;
-        this.diagnosticsState.lastBatchDoneSeconds = (performance.now() - this.diagnosticsStartedAt) / 1000;
+        this.diagnosticsState.lastBatchDoneSeconds =
+          (performance.now() - this.diagnosticsStartedAt) / 1000;
       }
       return decoded;
     } finally {
@@ -841,8 +1004,10 @@ export class PotreeV2PointCloud {
     }
   }
 
-  private decodeCachedNodes(cached: { node: OctreeNode; bytes: ArrayBuffer }[],
-    diagnosticsGeneration: number): Promise<DecodedBatchNode[]> {
+  private decodeCachedNodes(
+    cached: { node: OctreeNode; bytes: ArrayBuffer }[],
+    diagnosticsGeneration: number,
+  ): Promise<DecodedBatchNode[]> {
     const size = cached.reduce((sum, item) => sum + item.bytes.byteLength, 0);
     const combined = new Uint8Array(size);
     const requests = [];
@@ -850,21 +1015,35 @@ export class PotreeV2PointCloud {
     for (const { node, bytes } of cached) {
       combined.set(new Uint8Array(bytes), offset);
       requests.push({
-        name: node.name, pointCount: node.numPoints, offset: BigInt(offset), size: BigInt(bytes.byteLength),
-        origin: nodeOrigin(node), extent: nodeExtent(node.box),
+        name: node.name,
+        pointCount: node.numPoints,
+        offset: BigInt(offset),
+        size: BigInt(bytes.byteLength),
+        origin: nodeOrigin(node),
+        extent: nodeExtent(node.box),
       });
       offset += bytes.byteLength;
     }
-    return this.liveDecoder().decodeBatch(combined.buffer, 0n, requests, this.metadata,
-      timing => this.noteDecodeTiming(timing, diagnosticsGeneration), this.decodedAttributes, this.controller.signal);
+    return this.liveDecoder().decodeBatch(
+      combined.buffer,
+      0n,
+      requests,
+      this.metadata,
+      (timing) => this.noteDecodeTiming(timing, diagnosticsGeneration),
+      this.decodedAttributes,
+      this.controller.signal,
+    );
   }
 
   /**
    * Turn up to `limit` decoded nodes of any cloud into scene objects, spreading geometry
    * creation across frames. Returns true when at least one node was added.
    */
-  private static installDecodedNodes(clouds: readonly PotreeV2PointCloud[], limit: number): boolean {
-    const waiting = clouds.filter(cloud => cloud.decodedQueue.length > 0);
+  private static installDecodedNodes(
+    clouds: readonly PotreeV2PointCloud[],
+    limit: number,
+  ): boolean {
+    const waiting = clouds.filter((cloud) => cloud.decodedQueue.length > 0);
     const total = waiting.reduce((n, cloud) => n + cloud.decodedQueue.length, 0);
     if (total === 0) return false;
     if (total <= limit) {
@@ -879,7 +1058,8 @@ export class PotreeV2PointCloud {
     // sorted in reverse so pop() takes its most important node.
     for (const cloud of waiting) {
       const rank = cloud.selectionRank;
-      for (const item of cloud.decodedQueue) item.rank = rank.get(item.node) ?? Number.MAX_SAFE_INTEGER;
+      for (const item of cloud.decodedQueue)
+        item.rank = rank.get(item.node) ?? Number.MAX_SAFE_INTEGER;
       cloud.decodedQueue.sort((a, b) => b.rank - a.rank);
     }
     for (let installed = 0; installed < limit; installed++) {
@@ -898,9 +1078,15 @@ export class PotreeV2PointCloud {
     const geometry = createNodeGeometry(attributes, node.box);
     // The decoder counted the occupancy, so installing does not walk the points.
     const extent = nodeExtent(node.box);
-    this.levelOffsets.set(node, occupancyLevelOffset(
-      occupancy ?? pointOccupancy(attributes.position!.array, extent), extent, node.level, this.metadata.spacing,
-    ));
+    this.levelOffsets.set(
+      node,
+      occupancyLevelOffset(
+        occupancy ?? pointOccupancy(attributes.position!.array, extent),
+        extent,
+        node.level,
+        this.metadata.spacing,
+      ),
+    );
     const points = new Points(geometry, this.material);
     points.name = node.name;
     // Positions are relative to the node's minimum; the large offset stays in double-precision matrices.
@@ -911,7 +1097,8 @@ export class PotreeV2PointCloud {
     points.frustumCulled = false;
     points.layers.mask = this.layersMask;
     // Every node draws with the shared material, so its clips are uploaded right before its draw.
-    points.onBeforeRender = () => this.material.setNode(node, this.nodeClips.get(node) ?? NO_CLIP, node.box.min);
+    points.onBeforeRender = () =>
+      this.material.setNode(node, this.nodeClips.get(node) ?? NO_CLIP, node.box.min);
     this.group.add(points);
     const state = this.state(node);
     state.queued = false;
@@ -920,7 +1107,8 @@ export class PotreeV2PointCloud {
     this.installed.set(node, state);
     this.cachedPoints += node.numPoints;
     this.diagnosticsState.sceneConversions++;
-    this.diagnosticsState.lastSceneConversionSeconds = (performance.now() - this.diagnosticsStartedAt) / 1000;
+    this.diagnosticsState.lastSceneConversionSeconds =
+      (performance.now() - this.diagnosticsStartedAt) / 1000;
   }
 
   private ensureBoxHelper(node: OctreeNode, state: NodeState): LineSegments {
@@ -941,24 +1129,34 @@ export class PotreeV2PointCloud {
   private requestHierarchy(node: OctreeNode, limits: UpdateLimits): void {
     const state = this.state(node);
     const slots = limits.slots;
-    if (state.loading || this.waitingToRetry(state) || slots.inFlight >= limits.maxConcurrentLoads ||
-        this.gate.available() <= 0) return;
+    if (
+      state.loading ||
+      this.waitingToRetry(state) ||
+      slots.inFlight >= limits.maxConcurrentLoads ||
+      this.gate.available() <= 0
+    )
+      return;
     slots.inFlight++;
     this.inFlight++;
-    state.loading = this.loadHierarchy(node).then(() => {
-      state.failures = 0;
-    }, error => {
-      // A throttled node is not at fault: the gate pauses the origin and update() retries it.
-      if (!this.disposed && !isAbort(error) && !isThrottled(error)) {
-        this.noteFailure(state);
-        this.reportError(error, node.name);
-      }
-    }).finally(() => {
-      state.loading = undefined;
-      slots.inFlight--;
-      this.inFlight--;
-      this.releaseState(node, state);
-    });
+    state.loading = this.loadHierarchy(node)
+      .then(
+        () => {
+          state.failures = 0;
+        },
+        (error) => {
+          // A throttled node is not at fault: the gate pauses the origin and update() retries it.
+          if (!this.disposed && !isAbort(error) && !isThrottled(error)) {
+            this.noteFailure(state);
+            this.reportError(error, node.name);
+          }
+        },
+      )
+      .finally(() => {
+        state.loading = undefined;
+        slots.inFlight--;
+        this.inFlight--;
+        this.releaseState(node, state);
+      });
   }
 
   /**
@@ -970,7 +1168,8 @@ export class PotreeV2PointCloud {
    * decoding with priorities that the view may no longer have.
    */
   private static requestBatches(
-    work: readonly { cloud: PotreeV2PointCloud; pending: OctreeNode[] }[], limits: UpdateLimits,
+    work: readonly { cloud: PotreeV2PointCloud; pending: OctreeNode[] }[],
+    limits: UpdateLimits,
   ): void {
     // Like the other limits, the installation backlog is bounded across the clouds updated together.
     const queued = work.reduce((n, { cloud }) => n + cloud.decodedQueue.length, 0);
@@ -981,7 +1180,11 @@ export class PotreeV2PointCloud {
       const { cloud } = plan;
       if (cloud.liveDecoder().full) continue;
       // Each plan is one request or one cached decode, so these checks cover all it starts.
-      if (!plan.cached && (limits.slots.inFlight >= limits.maxConcurrentLoads || cloud.gate.available() <= 0)) continue;
+      if (
+        !plan.cached &&
+        (limits.slots.inFlight >= limits.maxConcurrentLoads || cloud.gate.available() <= 0)
+      )
+        continue;
       cloud.startBatch(plan, limits.slots);
     }
   }
@@ -998,19 +1201,28 @@ export class PotreeV2PointCloud {
     const candidates: OctreeNode[] = [];
     for (const node of nodes) {
       const state = this.states.get(node);
-      if (!state || (!state.points && !state.loading && !state.queued && !this.waitingToRetry(state))) {
+      if (
+        !state ||
+        (!state.points && !state.loading && !state.queued && !this.waitingToRetry(state))
+      ) {
         if (candidates.push(node) >= 64) break;
       }
     }
     // Nodes outside the last selection keep the order they were given in, after selected ones.
-    const rank = new Map(candidates.map((node, index) => [node, this.selectionRank.get(node) ?? 2 ** 40 + index]));
+    const rank = new Map(
+      candidates.map((node, index) => [node, this.selectionRank.get(node) ?? 2 ** 40 + index]),
+    );
     const plan = (nodes: OctreeNode[], cached: boolean): BatchPlan => ({
-      cloud: this, nodes, cached, rank: Math.min(...nodes.map(node => rank.get(node)!)),
+      cloud: this,
+      nodes,
+      cached,
+      rank: Math.min(...nodes.map((node) => rank.get(node)!)),
     });
     const cache = this.encodedCache;
-    const cached = cache ? candidates.filter(node => cache.has(node)) : [];
-    const plans = makeNodeBatches(cache ? candidates.filter(node => !cache.has(node)) : candidates)
-      .map(batch => plan(batch.nodes, false));
+    const cached = cache ? candidates.filter((node) => cache.has(node)) : [];
+    const plans = makeNodeBatches(
+      cache ? candidates.filter((node) => !cache.has(node)) : candidates,
+    ).map((batch) => plan(batch.nodes, false));
     for (let i = 0; i < cached.length; i += MAX_CACHED_PLAN_NODES) {
       plans.push(plan(cached.slice(i, i + MAX_CACHED_PLAN_NODES), true));
     }
@@ -1028,7 +1240,11 @@ export class PotreeV2PointCloud {
     if (!cached) {
       slots.inFlight++;
       this.inFlight++;
-      const request: BatchRequest = { nodes, controller: new AbortController(), wantedAt: performance.now() };
+      const request: BatchRequest = {
+        nodes,
+        controller: new AbortController(),
+        wantedAt: performance.now(),
+      };
       this.fetchingRequests.add(request);
       signal = request.controller.signal;
       let fetching = true;
@@ -1040,7 +1256,7 @@ export class PotreeV2PointCloud {
         this.inFlight--;
       };
     }
-    const states = nodes.map(node => this.state(node));
+    const states = nodes.map((node) => this.state(node));
     const fail = (failed: readonly OctreeNode[], error: unknown) => {
       // A throttled node is not at fault: the gate pauses the origin and update() retries it.
       if (this.disposed || isAbort(error) || isThrottled(error)) return;
@@ -1049,20 +1265,25 @@ export class PotreeV2PointCloud {
         this.reportError(error, node.name);
       }
     };
-    const promise = this.loadBatch(nodes, releaseRequest, signal).then(failures => {
-      const failed = new Set(failures.flatMap(failure => failure.nodes));
-      for (const [index, node] of nodes.entries()) {
-        if (!failed.has(node)) states[index]!.failures = 0;
-      }
-      for (const failure of failures) fail(failure.nodes, failure.error);
-    }, error => fail(nodes, error)).finally(() => {
-      for (const [index, node] of nodes.entries()) {
-        states[index]!.loading = undefined;
-        this.releaseState(node, states[index]!);
-      }
-      releaseRequest();
-      this.activeLoads--;
-    });
+    const promise = this.loadBatch(nodes, releaseRequest, signal)
+      .then(
+        (failures) => {
+          const failed = new Set(failures.flatMap((failure) => failure.nodes));
+          for (const [index, node] of nodes.entries()) {
+            if (!failed.has(node)) states[index]!.failures = 0;
+          }
+          for (const failure of failures) fail(failure.nodes, failure.error);
+        },
+        (error) => fail(nodes, error),
+      )
+      .finally(() => {
+        for (const [index, node] of nodes.entries()) {
+          states[index]!.loading = undefined;
+          this.releaseState(node, states[index]!);
+        }
+        releaseRequest();
+        this.activeLoads--;
+      });
     for (const state of states) state.loading = promise;
   }
 
@@ -1075,10 +1296,14 @@ export class PotreeV2PointCloud {
   }
 
   private static updateAll(
-    clouds: readonly PotreeV2PointCloud[], camera: Camera, viewportHeight: number, limits: UpdateLimits, force: boolean,
+    clouds: readonly PotreeV2PointCloud[],
+    camera: Camera,
+    viewportHeight: number,
+    limits: UpdateLimits,
+    force: boolean,
   ): boolean {
     const { pointBudget, cachePointBudget } = limits;
-    const active = clouds.filter(cloud => !cloud.disposed);
+    const active = clouds.filter((cloud) => !cloud.disposed);
     if (active.length === 0) return false;
     if (!validViewportHeight(viewportHeight)) return false;
     // From the parents down: a camera in a rig moved since the last render has stale matrices.
@@ -1087,7 +1312,8 @@ export class PotreeV2PointCloud {
     let layersChanged = false;
     for (const cloud of active) {
       if (cloud.syncLayers()) layersChanged = true;
-      if (!cloud.prepareView(camera, viewportHeight, pointBudget, cachePointBudget)) unchanged = false;
+      if (!cloud.prepareView(camera, viewportHeight, pointBudget, cachePointBudget))
+        unchanged = false;
     }
     if (unchanged) {
       for (const cloud of active) {
@@ -1103,7 +1329,7 @@ export class PotreeV2PointCloud {
     for (const cloud of active) cloud.settled = false;
     let traversals: Traversal[];
     try {
-      traversals = active.map(cloud => cloud.beginTraversal(camera, candidates));
+      traversals = active.map((cloud) => cloud.beginTraversal(camera, candidates));
       let pointsUsed = 0;
       let selectedCount = 0;
       while (candidates.size > 0) {
@@ -1138,11 +1364,16 @@ export class PotreeV2PointCloud {
     let changed = PotreeV2PointCloud.installDecodedNodes(active, limits.maxNodesToGPUPerFrame);
     PotreeV2PointCloud.requestBatches(traversals, limits);
     for (const traversal of traversals) {
-      if (traversal.cloud.finishTraversal(traversal, stamp) || traversal.cloud.clipChanged) changed = true;
+      if (traversal.cloud.finishTraversal(traversal, stamp) || traversal.cloud.clipChanged)
+        changed = true;
     }
     if (PotreeV2PointCloud.evictLeastRecent(traversals, cachePointBudget)) changed = true;
     for (const { cloud, sceneReady } of traversals) {
-      cloud.settled = sceneReady && cloud.decodedQueue.length === 0 && cloud.inFlight === 0 && cloud.activeLoads === 0;
+      cloud.settled =
+        sceneReady &&
+        cloud.decodedQueue.length === 0 &&
+        cloud.inFlight === 0 &&
+        cloud.activeLoads === 0;
       if (cloud.settled) cloud.loadWaiters.resolveAll();
     }
     return changed || layersChanged;
@@ -1161,7 +1392,12 @@ export class PotreeV2PointCloud {
   }
 
   /** Compute this frame's view; returns true when it and the settings match a settled previous update. */
-  private prepareView(camera: Camera, viewportHeight: number, pointBudget: number, cachePointBudget: number): boolean {
+  private prepareView(
+    camera: Camera,
+    viewportHeight: number,
+    pointBudget: number,
+    cachePointBudget: number,
+  ): boolean {
     this.group.updateWorldMatrix(true, false);
     const projection = this.projection
       .multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
@@ -1171,9 +1407,15 @@ export class PotreeV2PointCloud {
     if (this.clipping) appendClippingKey(this.clipping, this.group.matrixWorld, clipKey);
     this.clipChanged = this.clipping !== this.lastClipping || !sameKey(clipKey, this.lastClipKey);
     const shown = isShown(this.group);
-    const unchanged = this.settled && shown === this.shown && projection.equals(this.lastView) && viewportHeight === this.lastViewportHeight &&
-      pointBudget === this.lastPointBudget && cachePointBudget === this.lastCachePointBudget &&
-      this.minNodePixelSize === this.lastMinNodePixelSize && this.showBoundingBoxes === this.lastShowBoundingBoxes &&
+    const unchanged =
+      this.settled &&
+      shown === this.shown &&
+      projection.equals(this.lastView) &&
+      viewportHeight === this.lastViewportHeight &&
+      pointBudget === this.lastPointBudget &&
+      cachePointBudget === this.lastCachePointBudget &&
+      this.minNodePixelSize === this.lastMinNodePixelSize &&
+      this.showBoundingBoxes === this.lastShowBoundingBoxes &&
       !this.clipChanged;
     this.clipKey = this.lastClipKey;
     this.lastClipKey = clipKey;
@@ -1193,9 +1435,17 @@ export class PotreeV2PointCloud {
     camera.getWorldPosition(this.cameraPosition);
     this.frustum.setFromProjectionMatrix(this.projection);
     this.selectionRank.clear();
-    const clip = this.clipping ? snapshotClipping(this.clipping, this.group.matrixWorld) : undefined;
+    const clip = this.clipping
+      ? snapshotClipping(this.clipping, this.group.matrixWorld)
+      : undefined;
     const traversal: Traversal = {
-      cloud: this, clip, selected: new Set(), empty: [], pending: [], hierarchyPending: 0, sceneReady: false,
+      cloud: this,
+      clip,
+      selected: new Set(),
+      empty: [],
+      pending: [],
+      hierarchyPending: 0,
+      sceneReady: false,
     };
     this.nodeClips = new Map();
     // Nodes outside the view or clipped away are never queued, so the heap only holds visible candidates.
@@ -1208,15 +1458,25 @@ export class PotreeV2PointCloud {
   }
 
   private pushChildren(
-    { node, traversal, clip }: Candidate, camera: Camera, viewportHeight: number, candidates: CandidateHeap,
+    { node, traversal, clip }: Candidate,
+    camera: Camera,
+    viewportHeight: number,
+    candidates: CandidateHeap,
   ): void {
     for (const child of node.children) {
       if (!child || !this.frustum.intersectsBox(child.box)) continue;
       const radius = projectedRadius(
-        camera, this.cameraPosition, child.box, this.group.matrixWorld, this.projectedSphere, viewportHeight,
+        camera,
+        this.cameraPosition,
+        child.box,
+        this.group.matrixWorld,
+        this.projectedSphere,
+        viewportHeight,
       );
       if (radius < this.minNodePixelSize) continue;
-      const childClip = traversal.clip ? clipNode(clip, child.box, traversal.clip.keepPrune) : NO_CLIP;
+      const childClip = traversal.clip
+        ? clipNode(clip, child.box, traversal.clip.keepPrune)
+        : NO_CLIP;
       if (childClip) candidates.push({ node: child, pixels: radius, traversal, clip: childClip });
     }
   }
@@ -1235,7 +1495,10 @@ export class PotreeV2PointCloud {
   /** Show one cloud's selection; returns true when its scene changed. */
   private finishTraversal(traversal: Traversal, stamp: number): boolean {
     const changed = this.updateDisplayedNodes(traversal.selected, traversal.empty, stamp);
-    traversal.sceneReady = this.updateLoadDiagnostics(traversal.selected, traversal.hierarchyPending);
+    traversal.sceneReady = this.updateLoadDiagnostics(
+      traversal.selected,
+      traversal.hierarchyPending,
+    );
     return changed;
   }
 
@@ -1243,7 +1506,7 @@ export class PotreeV2PointCloud {
   private abortStaleRequests(selected: Set<OctreeNode>): void {
     const now = performance.now();
     for (const request of this.fetchingRequests) {
-      if (request.nodes.some(node => selected.has(node))) {
+      if (request.nodes.some((node) => selected.has(node))) {
         request.wantedAt = now;
       } else if (now - request.wantedAt >= STALE_REQUEST_MS) {
         this.fetchingRequests.delete(request);
@@ -1257,7 +1520,11 @@ export class PotreeV2PointCloud {
    * Show selected installed nodes and hide the ones displayed last frame, without
    * visiting every cached node. Displayed nodes move to the most recent end of the LRU.
    */
-  private updateDisplayedNodes(selected: Set<OctreeNode>, empty: readonly OctreeNode[], stamp: number): boolean {
+  private updateDisplayedNodes(
+    selected: Set<OctreeNode>,
+    empty: readonly OctreeNode[],
+    stamp: number,
+  ): boolean {
     let changed = false;
     const show = (object: Object3D | undefined, visible: boolean) => {
       if (!object || object.visible === visible) return;
@@ -1287,9 +1554,12 @@ export class PotreeV2PointCloud {
       displayed.add(node);
     }
     const lodNodes = new Set([...displayed, ...empty]);
-    if (lodNodes.size !== this.lodNodes.size || [...lodNodes].some(node => !this.lodNodes.has(node))) {
+    if (
+      lodNodes.size !== this.lodNodes.size ||
+      [...lodNodes].some((node) => !this.lodNodes.has(node))
+    ) {
       // Empty nodes have no density to measure, so their offset is 0, as in Potree.
-      this.visibleNodes.update(lodNodes, node => this.levelOffsets.get(node) ?? 0);
+      this.visibleNodes.update(lodNodes, (node) => this.levelOffsets.get(node) ?? 0);
       this.lodNodes = lodNodes;
       changed = true;
     }
@@ -1351,7 +1621,11 @@ export class PotreeV2PointCloud {
   private static evictLeastRecent(traversals: readonly Traversal[], budget: number): boolean {
     let total = traversals.reduce((sum, { cloud }) => sum + cloud.cachedPoints, 0);
     if (total <= budget) return false;
-    type Cursor = { traversal: Traversal; entries: Iterator<[OctreeNode, NodeState]>; head?: [OctreeNode, NodeState] };
+    type Cursor = {
+      traversal: Traversal;
+      entries: Iterator<[OctreeNode, NodeState]>;
+      head?: [OctreeNode, NodeState];
+    };
     const advance = (cursor: Cursor) => {
       const { cloud, selected } = cursor.traversal;
       cursor.head = undefined;
@@ -1366,7 +1640,7 @@ export class PotreeV2PointCloud {
         return;
       }
     };
-    const cursors = traversals.map(traversal => {
+    const cursors = traversals.map((traversal) => {
       const cursor: Cursor = { traversal, entries: traversal.cloud.installed.entries() };
       advance(cursor);
       return cursor;
@@ -1375,7 +1649,8 @@ export class PotreeV2PointCloud {
     while (total > budget) {
       let oldest: Cursor | undefined;
       for (const cursor of cursors) {
-        if (cursor.head && (!oldest || cursor.head[1].displayedAt < oldest.head![1].displayedAt)) oldest = cursor;
+        if (cursor.head && (!oldest || cursor.head[1].displayedAt < oldest.head![1].displayedAt))
+          oldest = cursor;
       }
       if (!oldest) break;
       const [node, state] = oldest.head!;
@@ -1410,16 +1685,24 @@ export class PotreeV2PointCloud {
    * points of this one; a PotreeV2PointCloudSet's pick() tests its clouds together.
    */
   pick(
-    renderer: WebGLRenderer, camera: Camera, x: number, y: number, options: PotreeV2PickOptions = {},
+    renderer: WebGLRenderer,
+    camera: Camera,
+    x: number,
+    y: number,
+    options: PotreeV2PickOptions = {},
   ): Promise<PotreeV2PickResult | null> {
     return PotreeV2PointCloud.pickAll([this], renderer, camera, x, y, options);
   }
 
   private static async pickAll(
-    clouds: readonly PotreeV2PointCloud[], renderer: WebGLRenderer, camera: Camera, x: number, y: number,
+    clouds: readonly PotreeV2PointCloud[],
+    renderer: WebGLRenderer,
+    camera: Camera,
+    x: number,
+    y: number,
     options: PotreeV2PickOptions,
   ): Promise<PotreeV2PickResult | null> {
-    const layers = clouds.map(cloud => cloud.pickLayer()).filter(layer => layer !== undefined);
+    const layers = clouds.map((cloud) => cloud.pickLayer()).filter((layer) => layer !== undefined);
     // Every cloud holds the same shared picker.
     const picker = layers[0]?.owner.picker;
     if (!picker) return null;
@@ -1434,20 +1717,28 @@ export class PotreeV2PointCloud {
     const targets: PickTarget[] = [];
     for (const node of this.displayed) {
       const points = this.installed.get(node)?.points;
-      if (points?.visible) targets.push({ node, points, clip: this.nodeClips.get(node) ?? NO_CLIP });
+      if (points?.visible)
+        targets.push({ node, points, clip: this.nodeClips.get(node) ?? NO_CLIP });
     }
     this.group.updateWorldMatrix(true, false);
     this.picker ??= PointPicker.acquire();
     return {
-      owner: this, display: this.material, groupMatrix: this.group.matrixWorld,
-      groupOrder: this.group.renderOrder, targets,
+      owner: this,
+      display: this.material,
+      groupMatrix: this.group.matrixWorld,
+      groupOrder: this.group.renderOrder,
+      targets,
     };
   }
 
-  private pickResult({ target, index, distance }: PickHit<PotreeV2PointCloud>, pixelRatio: number): PotreeV2PickResult {
+  private pickResult(
+    { target, index, distance }: PickHit<PotreeV2PointCloud>,
+    pixelRatio: number,
+  ): PotreeV2PickResult {
     const geometry = target.points.geometry;
     // Node-relative position to the cloud's local space, where boundingBox.min is the origin.
-    const position = new Vector3().fromBufferAttribute(geometry.getAttribute('position'), index)
+    const position = new Vector3()
+      .fromBufferAttribute(geometry.getAttribute('position'), index)
       .applyMatrix4(target.points.matrix);
     const min = this.metadata.boundingBox.min;
     const attributes: Record<string, number[]> = {};
@@ -1460,10 +1751,10 @@ export class PotreeV2PointCloud {
         attributes.rgb = values.slice(0, 3);
         continue;
       }
-      const source = this.metadata.attributes.find(attribute => attribute.name === name);
+      const source = this.metadata.attributes.find((attribute) => attribute.name === name);
       const normalization = source && attributeNormalization(source);
       attributes[name] = normalization
-        ? values.map(value => normalization.offset + value * normalization.span)
+        ? values.map((value) => normalization.offset + value * normalization.span)
         : values;
     }
     return {
@@ -1522,19 +1813,24 @@ function isShown(object: Object3D): boolean {
 }
 
 function projectedRadius(
-  camera: Camera, cameraPosition: Vector3, box: import('three').Box3,
-  worldMatrix: Matrix4, sphere: Sphere, height: number,
+  camera: Camera,
+  cameraPosition: Vector3,
+  box: import('three').Box3,
+  worldMatrix: Matrix4,
+  sphere: Sphere,
+  height: number,
 ): number {
   box.getBoundingSphere(sphere).applyMatrix4(worldMatrix);
   // Pixels per world unit (at distance 1 for perspective cameras), read from the matrix
   // the view is rendered with, so `zoom` and view offsets count as they do on screen.
-  const pixelsPerUnit = camera.projectionMatrix.elements[5]! * height / 2;
+  const pixelsPerUnit = (camera.projectionMatrix.elements[5]! * height) / 2;
   // Flags rather than instanceof, which fails when two copies of Three.js are bundled.
-  if ((camera as OrthographicCamera).isOrthographicCamera === true) return sphere.radius * pixelsPerUnit;
+  if ((camera as OrthographicCamera).isOrthographicCamera === true)
+    return sphere.radius * pixelsPerUnit;
   if ((camera as PerspectiveCamera).isPerspectiveCamera === true) {
     const distance = cameraPosition.distanceTo(sphere.center);
     if (distance < sphere.radius) return Infinity;
-    return sphere.radius * pixelsPerUnit / distance;
+    return (sphere.radius * pixelsPerUnit) / distance;
   }
   return Infinity;
 }
@@ -1544,6 +1840,9 @@ function projectedRadius(
  * first hierarchy chunk and the root node are ready; add `group` to a scene and the cloud to a
  * PotreeV2PointCloudSet to display it.
  */
-export function loadPotreeV2(metadataUrl: string | URL, options: PotreeV2Options = {}): Promise<PotreeV2PointCloud> {
+export function loadPotreeV2(
+  metadataUrl: string | URL,
+  options: PotreeV2Options = {},
+): Promise<PotreeV2PointCloud> {
   return loadPointCloud(metadataUrl, options);
 }
