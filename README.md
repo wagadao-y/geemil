@@ -17,3 +17,16 @@ pnpm dev
 同梱の `apps/playground/public/pump/` は、[libE57 のテストデータ](http://www.libe57.org/data.html) `PumpNoInvalidPoints.e57`（© 2008 Carnahan-Proctor and Cross, Inc.）を PotreeConverter で Potree 2.0 形式に変換したものです。ライセンスは同じフォルダの `LICENSE.txt`（libE57 Test Data License）を参照してください。
 
 `pnpm build` は両プロジェクトをビルドし、`pnpm test` はライブラリの形式解析と読込を検証します。ライブラリの API は [パッケージ README](packages/potree-v2-three/README.md) を参照してください。
+
+コードの検査と整形はルートで実行します。
+
+```sh
+pnpm lint          # ESLint による検査
+pnpm lint:fix      # 自動修正できる Lint 違反を修正
+pnpm format        # Prettier による整形
+pnpm format:check  # 整形済みか検査（CI 向け）
+```
+
+ESLint は TypeScript の推奨ルールを使い、ライブラリのソースには型情報を使う検査も適用します。Prettier はシングルクォート・セミコロンあり・行幅 100 を基準にします。参照リポジトリ、vendor、ビルド成果物、点群データは検査・整形の対象外です。
+
+変更後は `pnpm lint`、`pnpm format:check`、`pnpm build`、`pnpm test` で確認できます。

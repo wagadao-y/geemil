@@ -3,9 +3,21 @@
   "private": true,
   "packageManager": "pnpm@12.6.0",
   "scripts": {
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "build": "pnpm --filter @geemil/potree-v2-three build && pnpm --filter playground build",
     "dev": "pnpm --filter @geemil/potree-v2-three build && pnpm -r --parallel --filter @geemil/potree-v2-three --filter playground dev",
     "test": "pnpm --filter @geemil/potree-v2-three build && pnpm --filter @geemil/potree-v2-three test",
     "test:browser": "pnpm --filter @geemil/potree-v2-three build && pnpm --filter playground test:browser"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "17.12.0",
+    "prettier": "3.9.9",
+    "typescript-eslint": "^8.71.0"
   }
 }
