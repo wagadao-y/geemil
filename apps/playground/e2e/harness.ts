@@ -3,7 +3,7 @@ import {
   loadPotreeV2, PotreeV2Clipping, PotreeV2Gradients, PotreeV2PointCloudSet, type PotreeV2Options,
   type PotreeV2PointCloud, type PotreeV2PointColorType,
 } from '@geemil/potree-v2-three'
-import { PerspectiveCamera, Plane, Scene, Vector3, WebGLRenderer } from 'three'
+import { OrthographicCamera, PerspectiveCamera, Plane, Scene, Vector3, WebGLRenderer, type Camera } from 'three'
 
 const SIZE = 300
 
@@ -277,6 +277,55 @@ const harness = {
     }
   },
 
+  /** Compare the display and repeated picks where flat sibling point sprites overlap. */
+  async pickAcrossSiblingNodes(url: string) {
+    if (cloud) {
+      scene.remove(cloud.group)
+      cloud.dispose()
+      cloud = undefined
+    }
+    const flat = await loadPotreeV2(url, {
+      pointBudget: 3, minNodePixelSize: 1, pointSize: 10, maxNodesToGPUPerFrame: 8,
+    })
+    // Straight down -z, with no rotation or perspective to perturb equal depths.
+    const overhead = new OrthographicCamera(-4, 4, 4, -4, 0.1, 100)
+    overhead.position.set(4, 2, 20)
+    scene.add(flat.group)
+    try {
+      const deadline = performance.now() + 10_000
+      while (flat.loadDiagnostics.state !== 'complete') {
+        if (performance.now() > deadline) throw new Error('The flat sibling view did not finish loading')
+        flat.update(overhead, SIZE)
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      const points = flat.group.children.filter(object => object.type === 'Points')
+      const creationOrder = [...points].filter(object => object.name !== 'r')
+        .sort((a, b) => a.id - b.id).map(object => object.name)
+      const x = SIZE / 2
+      const y = SIZE / 2
+      const at = ((SIZE - 1 - y) * SIZE + x) * 4
+      const pixel = () => Array.from(render(renderer, overhead).slice(at, at + 3))
+      // Both sprites must actually cover the tested pixel, so the comparison cannot pass
+      // just because one point is offscreen or outside its sprite.
+      const alone: Record<string, number[]> = {}
+      for (const name of ['r0', 'r4']) {
+        for (const point of points) point.visible = point.name === name
+        alone[name] = pixel()
+      }
+      for (const point of points) point.visible = true
+      const drawn = pixel()
+      const picks = []
+      for (let repeat = 0; repeat < 3; repeat++) {
+        const hit = await flat.pick(renderer, overhead, x + 0.5, y + 0.5)
+        picks.push(hit && { node: hit.node, color: hit.attributes.rgb, height: hit.sourcePosition[2] })
+      }
+      return { creationOrder, alone, drawn, picks }
+    } finally {
+      scene.remove(flat.group)
+      flat.dispose()
+    }
+  },
+
   errors() {
     const logDepthError = logDepthRenderer?.getContext().getError() ?? 0
     return { shaderErrors: [...shaderErrors], glError: gl.getError() || logDepthError }
@@ -284,8 +333,8 @@ const harness = {
 }
 
 /** Draw the view and read back its RGBA pixels. */
-function render(target = renderer): Uint8Array<ArrayBuffer> {
-  target.render(scene, camera)
+function render(target = renderer, view: Camera = camera): Uint8Array<ArrayBuffer> {
+  target.render(scene, view)
   const pixels = new Uint8Array(SIZE * SIZE * 4)
   const context = target.getContext()
   context.readPixels(0, 0, SIZE, SIZE, context.RGBA, context.UNSIGNED_BYTE, pixels)

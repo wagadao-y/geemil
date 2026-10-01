@@ -7,6 +7,8 @@ const BROTLI = '/pump/metadata.json'
 const DEFAULT = '/e2e/data/pump-default/metadata.json'
 /** DEFAULT with the classes of CLASS_BANDS by x, also written by global-setup.ts. */
 const CLASSES = '/e2e/data/pump-classes/metadata.json'
+/** Three flat points, with red and blue siblings on either side of their x boundary. */
+const FLAT_SIBLINGS = '/e2e/data/flat-siblings/metadata.json'
 const COLOR_ATTRIBUTES = ['rgb', 'intensity', 'classification']
 /** Potree's colors of the classes in CLASS_BANDS; 200 has none, so it takes the default. */
 const CLASS_COLORS: Record<number, string> = {
@@ -207,4 +209,17 @@ test('picks resolve equal depths in the order the display draws the clouds', asy
   expect(counts.front).toBeGreaterThan(20)
   expect(counts.back).toBe(0)
   expect(counts.mismatched).toBe(0)
+})
+
+test('orthographic picks match flat sibling points with equal depths and reversed creation order', async ({ page }) => {
+  const result = await page.evaluate(url => window.harness.pickAcrossSiblingNodes(url), FLAT_SIBLINGS)
+  // Guard the regression setup: selection visits r0 before r4, but the original Points IDs
+  // put r4 first. The display draws r0 last when material and view depth are equal.
+  expect(result.creationOrder).toEqual(['r4', 'r0'])
+  expect(result.alone).toEqual({ r0: [255, 0, 0], r4: [0, 0, 255] })
+  expect(result.drawn).toEqual([255, 0, 0])
+  // Reusing the proxies must preserve the same winner on every pick.
+  expect(result.picks).toEqual(Array.from({ length: 3 }, () => ({
+    node: 'r0', color: result.drawn, height: 2,
+  })))
 })
