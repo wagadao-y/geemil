@@ -9,6 +9,7 @@ import {
   PotreeV2PointCloudSet,
   selectPotreeV2Files,
   type PotreeV2ClipBoxMode,
+  type PotreeV2Options,
   type PotreeV2PickResult,
   type PotreeV2PointCloud,
   type PotreeV2PointColorType,
@@ -17,6 +18,7 @@ import {
 } from '@geemil/potree-v2-three';
 import GUI from 'lil-gui';
 import {
+  Box3,
   BoxGeometry,
   EdgesGeometry,
   Euler,
@@ -35,6 +37,22 @@ import { RenderProfiler } from './perf';
 
 type GradientName = keyof typeof PotreeV2Gradients;
 
+/** One loaded or loading point cloud, shown as a folder of the data tree. */
+interface Entry {
+  name: string;
+  /** Loads the cloud again with the current options, for reloads and attribute changes. */
+  load: (options: PotreeV2Options) => Promise<PotreeV2PointCloud>;
+  /** metadata.json URL, kept in the page URL; undefined for local files. */
+  url?: string;
+  cloud?: PotreeV2PointCloud;
+  /** Decoded attributes for reloads; undefined decodes the library's defaults. */
+  attributes?: string[];
+  /** Bumped by each load and by removal, so a superseded load is dropped. */
+  requestId: number;
+  folder: GUI;
+  view: { visible: boolean; state: string };
+}
+
 const app = document.querySelector<HTMLDivElement>('#app')!;
 app.innerHTML = `
   <div id="viewport"><div id="pick-marker" hidden></div></div>
@@ -47,8 +65,11 @@ const filesInput = document.querySelector<HTMLInputElement>('#files-input')!;
 const status = document.querySelector<HTMLDivElement>('#status')!;
 const pickMarker = document.querySelector<HTMLDivElement>('#pick-marker')!;
 
+const initialUrls = new URLSearchParams(location.search).getAll('url');
+if (initialUrls.length === 0) initialUrls.push('/pump/metadata.json');
+
 const settings = {
-  url: new URLSearchParams(location.search).get('url') ?? '/pump/metadata.json',
+  url: initialUrls[0],
   pointSize: 2,
   pointShape: 'square' as PotreeV2PointShape,
   edl: false,
@@ -73,13 +94,14 @@ const settings = {
   continuousRender: false,
 };
 const info = {
+  name: '—',
   source: '—',
   points: '—',
   encoding: '—',
   projection: '—',
   attributes: '—',
 };
-// Box centre and size are fractions of the cloud's bounding box; the plane offset too.
+// Box centre and size are fractions of the bounding box of every loaded cloud; the plane offset too.
 const clipSettings = {
   boxEnabled: false,
   boxMode: 'hide-inside' as PotreeV2ClipBoxMode,
@@ -106,8 +128,8 @@ const performanceStats = {
   drawCalls: '—',
   points: '—',
 };
-const picked = { node: '—', index: '—', position: '—', attributes: '—' };
-const fetchStats = { nodes: 0, requests: 0, average: '—' };
+const picked = { cloud: '—', node: '—', index: '—', position: '—', attributes: '—' };
+const fetchStats = { nodes: '—', requests: '—', average: '—' };
 const timing = {
   state: '—',
   elapsed: '—',
@@ -131,34 +153,39 @@ const timing = {
   aborted: '—',
 };
 const actions = {
-  loadUrl: () => {
+  addUrl: () => {
     const url = settings.url.trim();
     if (!url) {
       setStatus('metadata.json の URL を入力してください。', true);
       return;
     }
-    decodedAttributes = undefined;
-    void openCloud(() => loadPotreeV2(url, loadOptions()), url, url);
+    addEntry(nameFromUrl(url), (options) => loadPotreeV2(url, options), url);
   },
   chooseFiles: () => filesInput.click(),
+  fitAll: () => {
+    const shown = loadedClouds().filter((target) => target.group.visible);
+    const box = cloudsBox(shown.length > 0 ? shown : loadedClouds());
+    if (box) fitBox(box);
+  },
+  removeAll: () => {
+    for (const entry of [...entries]) removeEntry(entry);
+  },
   clearFetchStats: () => {
-    cloud?.clearFetchStats();
+    selected?.cloud?.clearFetchStats();
     updateFetchStats();
   },
-  reload: () => {
-    if (currentLoader) void openCloud(currentLoader, currentSource, currentUrl);
-  },
   resetMeasurement: () => {
-    cloud?.resetLoadDiagnostics();
+    selected?.cloud?.resetLoadDiagnostics();
     updateTiming();
   },
   copyMeasurement: () => {
-    if (!cloud) return;
+    const target = selected?.cloud;
+    if (!selected || !target) return;
     const result = {
       decoder: 'google/brotli WASM',
-      source: currentSource,
-      fetchStats: cloud.fetchStats,
-      loadDiagnostics: cloud.loadDiagnostics,
+      source: selected.url ?? 'ローカルファイル',
+      fetchStats: target.fetchStats,
+      loadDiagnostics: target.loadDiagnostics,
     };
     void navigator.clipboard.writeText(JSON.stringify(result, null, 2)).catch((error) => {
       setStatus(error instanceof Error ? error.message : String(error), true);
@@ -169,9 +196,12 @@ const actions = {
 const gui = new GUI({ title: 'Potree v2 / Three.js', width: 340 });
 const sourceFolder = gui.addFolder('読み込み');
 sourceFolder.add(settings, 'url').name('metadata.json URL');
-sourceFolder.add(actions, 'loadUrl').name('URL を読み込む');
-sourceFolder.add(actions, 'chooseFiles').name('3ファイルを選択');
-sourceFolder.add(actions, 'reload').name('同じデータを再読み込み');
+sourceFolder.add(actions, 'addUrl').name('URL を追加');
+sourceFolder.add(actions, 'chooseFiles').name('3ファイルを選んで追加');
+// Each cloud adds a folder after these buttons.
+const dataFolder = gui.addFolder('点群');
+dataFolder.add(actions, 'fitAll').name('全体に視点を合わせる');
+dataFolder.add(actions, 'removeAll').name('すべて削除');
 const appearanceFolder = gui.addFolder('表示');
 appearanceFolder
   .add(settings, 'pointBudgetMP', 0.5, 20, 0.5)
@@ -197,13 +227,13 @@ appearanceFolder
   .add(settings, 'minNodePixelSize', 0, 200, 1)
   .name('最小ノード投影半径 (px)')
   .onChange((value: number) => {
-    if (cloud) cloud.minNodePixelSize = value;
+    for (const target of loadedClouds()) target.minNodePixelSize = value;
   });
 appearanceFolder
   .add(settings, 'showBoundingBoxes')
   .name('ノードの bbox を表示')
   .onChange((value: boolean) => {
-    if (cloud) cloud.showBoundingBoxes = value;
+    for (const target of loadedClouds()) target.showBoundingBoxes = value;
   });
 appearanceFolder
   .add(settings, 'freezeView')
@@ -221,7 +251,7 @@ appearanceFolder
   .add(settings, 'pointSizeType', { 固定: 'fixed', 距離で減衰: 'attenuated', 適応: 'adaptive' })
   .name('点サイズの種類')
   .onChange((value: PotreeV2PointSizeType) => {
-    if (cloud) cloud.material.sizeType = value;
+    for (const target of loadedClouds()) target.material.sizeType = value;
     pointSizeController.setValue(pointSizes[value]);
     requestRender();
   });
@@ -230,32 +260,32 @@ const pointSizeController = appearanceFolder
   .name('点のサイズ (px / 倍率)')
   .onChange((value: number) => {
     pointSizes[settings.pointSizeType] = value;
-    if (cloud) cloud.material.size = value;
+    for (const target of loadedClouds()) target.material.size = value;
     requestRender();
   });
 appearanceFolder
   .add(settings, 'minPointSize', 0, 20, 0.5)
   .name('最小サイズ (px)')
   .onChange((value: number) => {
-    if (cloud) cloud.material.minSize = value;
+    for (const target of loadedClouds()) target.material.minSize = value;
     requestRender();
   });
 appearanceFolder
   .add(settings, 'maxPointSize', 1, 100, 1)
   .name('最大サイズ (px)')
   .onChange((value: number) => {
-    if (cloud) cloud.material.maxSize = value;
+    for (const target of loadedClouds()) target.material.maxSize = value;
     requestRender();
   });
 appearanceFolder
   .add(settings, 'pointShape', { 四角: 'square', 丸: 'circle' })
   .name('点の形')
   .onChange((value: PotreeV2PointShape) => {
-    if (cloud) cloud.material.shape = value;
+    for (const target of loadedClouds()) target.material.shape = value;
     requestRender();
   });
 const colorFolder = gui.addFolder('色');
-const colorTypeController = colorFolder
+colorFolder
   .add(settings, 'pointColorType', {
     RGB: 'rgb',
     単色: 'solid',
@@ -265,28 +295,28 @@ const colorTypeController = colorFolder
   })
   .name('色の種類')
   .onChange(() => {
-    if (cloud) applyColorType(cloud);
+    for (const entry of entries) applyColorType(entry);
     requestRender();
   });
 colorFolder
   .addColor(settings, 'solidColor')
   .name('単色')
   .onChange((value: string) => {
-    cloud?.material.color.set(value);
+    for (const target of loadedClouds()) target.material.color.set(value);
     requestRender();
   });
 colorFolder
   .add(settings, 'gradient', Object.keys(PotreeV2Gradients))
   .name('標高のグラデーション')
   .onChange((value: GradientName) => {
-    if (cloud) cloud.material.gradient = PotreeV2Gradients[value];
+    for (const target of loadedClouds()) target.material.gradient = PotreeV2Gradients[value];
     requestRender();
   });
 colorFolder
   .add(settings, 'intensityGamma', 0.1, 4, 0.05)
   .name('強度のガンマ')
   .onChange((value: number) => {
-    if (cloud) cloud.material.intensityGamma = value;
+    for (const target of loadedClouds()) target.material.intensityGamma = value;
     requestRender();
   });
 // Shared by every loaded cloud, so hidden classes stay hidden across reloads.
@@ -313,7 +343,7 @@ for (const [code, name] of Object.entries(classNames)) {
     .onChange((visible: boolean) => {
       classification.setVisible(Number(code), visible);
       // Hiding a class needs the classification attribute.
-      if (cloud) decodeAndReload(cloud, 'classification');
+      for (const entry of entries) decodeAndReload(entry, 'classification');
       requestRender();
     });
 }
@@ -360,14 +390,17 @@ pickFolder
     pickRequested = true;
   });
 const pickControllers = [
+  pickFolder.add(picked, 'cloud').name('点群').disable(),
   pickFolder.add(picked, 'node').name('ノード').disable(),
   pickFolder.add(picked, 'index').name('点番号').disable(),
   pickFolder.add(picked, 'position').name('座標').disable(),
   pickFolder.add(picked, 'attributes').name('属性').disable(),
 ];
 pickFolder.close();
+// The info, fetch statistics and load measurement folders show the selected cloud.
 const infoFolder = gui.addFolder('データ情報');
 const infoControllers = [
+  infoFolder.add(info, 'name').name('選択中の点群').disable(),
   infoFolder.add(info, 'source').name('読み込み元').disable(),
   infoFolder.add(info, 'points').name('点数').disable(),
   infoFolder.add(info, 'encoding').name('符号化').disable(),
@@ -478,16 +511,15 @@ clipBoxHelper.matrixAutoUpdate = false;
 clipBoxHelper.visible = false;
 scene.add(clipBoxHelper);
 
-let cloud: PotreeV2PointCloud | undefined;
-/** Selects and loads the nodes of the displayed cloud; dispose() removes a cloud from it. */
+/** The clouds in the order they were added; each selects and loads its nodes through `clouds`. */
+const entries: Entry[] = [];
+/** The cloud the info, fetch statistics and load measurement folders show. */
+let selected: Entry | undefined;
+/** Selects and loads the nodes of every loaded cloud; dispose() removes a cloud from it. */
 const clouds = new PotreeV2PointCloudSet({
   pointBudget: settings.pointBudgetMP * 1_000_000,
   maxNodesToGPUPerFrame: settings.maxNodesToGPUPerFrame,
 });
-let currentLoader: (() => Promise<PotreeV2PointCloud>) | undefined;
-let currentSource = '—';
-let currentUrl: string | undefined;
-let requestId = 0;
 let frame = 0;
 let lastTimingDisplayAt = 0;
 // Render only when the camera, the scene or a setting changed.
@@ -513,20 +545,49 @@ function setStatus(message: string, error = false) {
   status.dataset.error = String(error);
 }
 
-/** Place the box and plane relative to the loaded cloud's bounds, in its group's local space. */
+function loadedClouds(): PotreeV2PointCloud[] {
+  return entries.flatMap((entry) => (entry.cloud ? [entry.cloud] : []));
+}
+
+/** The world-space bounds of `targets`, or undefined when there are none. */
+function cloudsBox(targets: PotreeV2PointCloud[]): Box3 | undefined {
+  if (targets.length === 0) return undefined;
+  const box = new Box3();
+  for (const target of targets) {
+    box.union(target.boundingBox.applyMatrix4(target.group.matrixWorld));
+  }
+  return box;
+}
+
+/** `/a/b/metadata.json` is named `b`, after its folder. */
+function nameFromUrl(url: string): string {
+  const parts = url.split(/[?#]/)[0].split('/').filter(Boolean);
+  return parts.length >= 2 ? parts[parts.length - 2] : url;
+}
+
+/** `name`, or `name (2)` and so on when another cloud has it. */
+function uniqueName(name: string, except?: Entry): string {
+  const taken = (candidate: string) =>
+    entries.some((entry) => entry !== except && entry.name === candidate);
+  if (!taken(name)) return name;
+  let n = 2;
+  while (taken(`${name} (${n})`)) n++;
+  return `${name} (${n})`;
+}
+
+/** Place the box and plane relative to the bounds of every loaded cloud, in world space. */
 function applyClipping() {
-  const bounds = cloud?.metadata.boundingBox;
-  const extent = bounds
-    ? new Vector3(...bounds.max).sub(new Vector3(...bounds.min))
-    : new Vector3(1, 1, 1);
+  const bounds = cloudsBox(loadedClouds()) ?? new Box3(new Vector3(), new Vector3(1, 1, 1));
+  const extent = bounds.getSize(new Vector3());
   const c = clipSettings;
-  const center = new Vector3(c.centerX, c.centerY, c.centerZ).multiply(extent);
+  const center = new Vector3(c.centerX, c.centerY, c.centerZ).multiply(extent).add(bounds.min);
   const size = new Vector3(c.sizeX, c.sizeY, c.sizeZ).multiply(extent);
   const rotation = new Quaternion().setFromEuler(new Euler(0, 0, (c.rotationZ * Math.PI) / 180));
+  const loaded = entries.some((entry) => entry.cloud);
   clipBox.matrix.compose(center, rotation, size);
   clipBox.mode = c.boxMode;
   clipBox.prune = c.boxPrune;
-  clipBox.enabled = c.boxEnabled && cloud !== undefined;
+  clipBox.enabled = c.boxEnabled && loaded;
   clipBoxHelper.matrix.copy(clipBox.matrix);
   clipBoxHelper.visible = clipBox.enabled && c.showBox;
   const axis = { x: 0, y: 1, z: 2 }[c.planeAxis];
@@ -534,18 +595,20 @@ function applyClipping() {
   // Keeps the side the normal points to, from `planeOffset` of the extent along the axis.
   clipPlane.plane.setFromNormalAndCoplanarPoint(
     normal,
-    new Vector3().setComponent(axis, c.planeOffset * extent.getComponent(axis)),
+    bounds.min
+      .clone()
+      .setComponent(
+        axis,
+        bounds.min.getComponent(axis) + c.planeOffset * extent.getComponent(axis),
+      ),
   );
   clipPlane.prune = c.planePrune;
-  clipPlane.enabled = c.planeEnabled && cloud !== undefined;
+  clipPlane.enabled = c.planeEnabled && loaded;
 }
 
-function fitCloud(next: PotreeV2PointCloud) {
-  const extent = new Vector3(...next.metadata.boundingBox.max).sub(
-    new Vector3(...next.metadata.boundingBox.min),
-  );
-  const center = extent.clone().multiplyScalar(0.5);
-  const radius = Math.max(extent.length() * 0.5, 1);
+function fitBox(box: Box3) {
+  const center = box.getCenter(new Vector3());
+  const radius = Math.max(box.getSize(new Vector3()).length() * 0.5, 1);
   controls.target.copy(center);
   camera.position.copy(center).add(new Vector3(radius, -radius, radius * 0.75));
   camera.near = Math.max(radius / 100_000, 0.001);
@@ -574,6 +637,7 @@ function updatePickMarker() {
 function showPick(result: PotreeV2PickResult | null) {
   pickedPosition = result?.position;
   updatePickMarker();
+  picked.cloud = entries.find((entry) => entry.cloud === result?.cloud)?.name ?? '—';
   picked.node = result?.node ?? '—';
   picked.index = result ? String(result.index) : '—';
   picked.position = result
@@ -591,16 +655,16 @@ function startPick() {
   // Each pick redraws the nodes under the pointer, so wait until the camera stops.
   if (!pickRequested || picking || cameraMoving || !settings.hoverPick) return;
   pickRequested = false;
-  const target = cloud;
-  if (!target || !pointer) {
+  if (!pointer || !entries.some((entry) => entry.cloud)) {
     showPick(null);
     return;
   }
   picking = true;
-  target
+  clouds
     .pick(renderer, camera, pointer.x, pointer.y, { radius: settings.pickRadius })
     .then((result) => {
-      if (target === cloud) showPick(result);
+      // The cloud may have been removed or reloaded while picking.
+      showPick(result && entries.some((entry) => entry.cloud === result.cloud) ? result : null);
     })
     .catch((error) => setStatus(error instanceof Error ? error.message : String(error), true))
     .finally(() => {
@@ -608,28 +672,32 @@ function startPick() {
     });
 }
 
-function updateInfo(next?: PotreeV2PointCloud, source = '—') {
-  info.source = source;
-  info.points = next ? next.metadata.points.toLocaleString() : '—';
-  info.encoding = next?.metadata.encoding ?? '—';
-  info.projection = next?.metadata.projection || '記載なし';
-  info.attributes = next ? next.metadata.attributes.map((a) => a.name).join(', ') : '—';
+function updateInfo() {
+  const target = selected?.cloud;
+  info.name = selected?.name ?? '—';
+  info.source = selected ? (selected.url ?? 'ローカルファイル') : '—';
+  info.points = target ? target.metadata.points.toLocaleString() : '—';
+  info.encoding = target?.metadata.encoding ?? '—';
+  info.projection = target ? target.metadata.projection || '記載なし' : '—';
+  info.attributes = target ? target.metadata.attributes.map((a) => a.name).join(', ') : '—';
   for (const controller of infoControllers) controller.updateDisplay();
 }
 
 function updateFetchStats() {
-  const current = cloud?.fetchStats;
-  const nodes = current?.fetchedNodes ?? 0;
-  const requests = current?.rangeRequests ?? 0;
+  const current = selected?.cloud?.fetchStats;
+  const nodes = current ? String(current.fetchedNodes) : '—';
+  const requests = current ? String(current.rangeRequests) : '—';
   if (fetchStats.nodes === nodes && fetchStats.requests === requests) return;
   fetchStats.nodes = nodes;
   fetchStats.requests = requests;
-  fetchStats.average = requests ? (nodes / requests).toFixed(1) : '—';
+  fetchStats.average = current?.rangeRequests
+    ? (current.fetchedNodes / current.rangeRequests).toFixed(1)
+    : '—';
   for (const controller of statControllers) controller.updateDisplay();
 }
 
 function updateTiming() {
-  const current = cloud?.loadDiagnostics;
+  const current = selected?.cloud?.loadDiagnostics;
   const seconds = (value: number | null | undefined) =>
     value == null ? '—' : `${value.toFixed(2)} s`;
   const milliseconds = (value: number | undefined) =>
@@ -668,79 +736,173 @@ function updateTiming() {
   if (changed) for (const controller of timingControllers) controller.updateDisplay();
 }
 
-/** `keepCamera` keeps the view, for reloads of the same data. */
-async function openCloud(
-  loader: () => Promise<PotreeV2PointCloud>,
-  source: string,
-  url?: string,
-  keepCamera = false,
-) {
-  const current = ++requestId;
-  currentLoader = loader;
-  currentSource = source;
-  currentUrl = url;
-  cloud?.dispose();
-  if (cloud) scene.remove(cloud.group);
-  cloud = undefined;
-  requestRender();
-  showPick(null);
+/** Show `entry` in the info, fetch statistics and load measurement folders; marks its folder. */
+function select(entry: Entry | undefined) {
+  selected = entry;
+  for (const other of entries) {
+    other.folder.title(other === selected ? `▶ ${other.name}` : other.name);
+  }
   updateInfo();
   updateFetchStats();
   updateTiming();
-  setStatus('読み込み中…');
+}
+
+function setEntryState(entry: Entry, state: string) {
+  entry.view.state = state;
+  for (const controller of entry.folder.controllers) controller.updateDisplay();
+}
+
+/** Keep the URLs of the clouds in the page URL, so a reload opens them again. */
+function updateHistory() {
+  const params = new URLSearchParams();
+  for (const entry of entries) if (entry.url) params.append('url', entry.url);
+  const query = params.toString();
+  history.replaceState(null, '', query ? `?${query}` : location.pathname);
+}
+
+function addEntry(name: string, load: Entry['load'], url?: string) {
+  const unique = uniqueName(name);
+  const entry: Entry = {
+    name: unique,
+    load,
+    url,
+    requestId: 0,
+    folder: dataFolder.addFolder(unique),
+    view: { visible: true, state: '—' },
+  };
+  entry.folder
+    .add(entry.view, 'visible')
+    .name('表示')
+    .onChange((visible: boolean) => {
+      // A hidden cloud selects and loads nothing, so the point budget goes to the others.
+      if (entry.cloud) entry.cloud.group.visible = visible;
+      requestRender();
+    });
+  entry.folder.add(entry.view, 'state').name('状態').disable();
+  entry.folder
+    .add(
+      {
+        fit: () => {
+          const box = entry.cloud && cloudsBox([entry.cloud]);
+          if (box) fitBox(box);
+        },
+      },
+      'fit',
+    )
+    .name('視点を合わせる');
+  entry.folder.add({ select: () => select(entry) }, 'select').name('詳細を表示');
+  entry.folder.add({ reload: () => void loadEntry(entry) }, 'reload').name('再読み込み');
+  entry.folder.add({ remove: () => removeEntry(entry) }, 'remove').name('削除');
+  entries.push(entry);
+  select(entry);
+  updateHistory();
+  void loadEntry(entry);
+}
+
+function removeEntry(entry: Entry) {
+  const index = entries.indexOf(entry);
+  if (index < 0) return;
+  entry.requestId++;
+  if (entry.cloud) {
+    scene.remove(entry.cloud.group);
+    entry.cloud.dispose();
+    entry.cloud = undefined;
+  }
+  entries.splice(index, 1);
+  entry.folder.destroy();
+  if (selected === entry) select(entries[Math.min(index, entries.length - 1)]);
+  applyClipping();
+  updateHistory();
+  pickRequested = true;
+  requestRender();
+}
+
+/** Load the cloud of `entry`, replacing the one it shows; the first cloud in the scene fits the view. */
+async function loadEntry(entry: Entry) {
+  const current = ++entry.requestId;
+  if (entry.cloud) {
+    scene.remove(entry.cloud.group);
+    entry.cloud.dispose();
+    entry.cloud = undefined;
+    applyClipping();
+    requestRender();
+  }
+  setEntryState(entry, '読み込み中…');
+  if (entry === selected) updateInfo();
+  setStatus(`${entry.name} を読み込み中…`);
   try {
-    const next = await loader();
-    if (current !== requestId) {
+    const next = await entry.load(loadOptions(entry));
+    if (current !== entry.requestId) {
       next.dispose();
       return;
     }
-    cloud = next;
+    // As Potree, at the metadata.json position of its bounding box minimum, so clouds in one
+    // coordinate system line up. The camera-relative transforms are computed in float64.
+    next.group.position.copy(next.worldOffset);
+    next.group.visible = entry.view.visible;
+    next.group.updateMatrixWorld();
+    entry.cloud = next;
     clouds.add(next);
-    updateFetchStats();
-    updateTiming();
-    applyColorType(next);
+    // Local files have no folder name to go by.
+    if (!entry.url && next.metadata.name) {
+      entry.name = uniqueName(next.metadata.name, entry);
+      select(selected);
+    }
+    // Decoding another attribute loads the cloud again.
+    if (applyColorType(entry)) return;
+    const first = entries.every((other) => other === entry || !other.cloud);
     scene.add(next.group);
-    if (!keepCamera) fitCloud(next);
+    if (first) fitBox(cloudsBox([next])!);
     applyClipping();
     requestRender();
-    updateInfo(next, source);
-    setStatus('読み込み完了。視点を動かすと詳細を追加で読み込みます。');
-    history.replaceState(null, '', url ? `?url=${encodeURIComponent(url)}` : location.pathname);
+    setEntryState(entry, '読み込み完了');
+    if (entry === selected) {
+      updateInfo();
+      updateFetchStats();
+      updateTiming();
+    }
+    setStatus(`${entry.name} を読み込みました。視点を動かすと詳細を追加で読み込みます。`);
   } catch (error) {
-    if (current === requestId)
-      setStatus(error instanceof Error ? error.message : String(error), true);
+    if (current !== entry.requestId) return;
+    const message = error instanceof Error ? error.message : String(error);
+    setEntryState(entry, 'エラー');
+    setStatus(`${entry.name}: ${message}`, true);
   }
 }
 
-/** Decoded attributes for reloads of the same data; undefined decodes the library's defaults. */
-let decodedAttributes: string[] | undefined;
-
 /** Reload with `name` decoded, when the data has it and it is not decoded yet; returns true when it reloads. */
-function decodeAndReload(target: PotreeV2PointCloud, name: string): boolean {
+function decodeAndReload(entry: Entry, name: string): boolean {
+  const target = entry.cloud;
   if (
+    !target ||
     target.material.attributes.includes(name) ||
     !target.metadata.attributes.some((a) => a.name === name)
   )
     return false;
-  decodedAttributes = [...target.material.attributes, name];
-  // Only the decoded attributes change, so the view stays where it is.
-  if (currentLoader) void openCloud(currentLoader, currentSource, currentUrl, true);
+  entry.attributes = [...target.material.attributes, name];
+  void loadEntry(entry);
   return true;
 }
 
-/** Datasets differ in attributes, so a color type the cloud cannot show falls back to its default. */
-function applyColorType(target: PotreeV2PointCloud) {
+/**
+ * Datasets differ in attributes, so a cloud that cannot show the color type keeps its own and
+ * reports it. Returns true when the cloud reloads to decode the attribute.
+ */
+function applyColorType(entry: Entry): boolean {
+  const target = entry.cloud;
+  if (!target) return false;
   const type = settings.pointColorType;
-  if ((type === 'intensity' || type === 'classification') && decodeAndReload(target, type)) return;
+  if ((type === 'intensity' || type === 'classification') && decodeAndReload(entry, type))
+    return true;
   try {
-    target.material.colorType = settings.pointColorType;
+    target.material.colorType = type;
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : String(error), true);
-    colorTypeController.setValue(target.material.colorType);
+    setStatus(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`, true);
   }
+  return false;
 }
 
-function loadOptions() {
+function loadOptions(entry: Entry): PotreeV2Options {
   return {
     material: {
       size: settings.pointSize,
@@ -755,9 +917,10 @@ function loadOptions() {
     },
     minNodePixelSize: settings.minNodePixelSize,
     showBoundingBoxes: settings.showBoundingBoxes,
-    attributes: decodedAttributes,
+    attributes: entry.attributes,
     clipping,
-    onError: (error: Error, node: string) => setStatus(`${node}: ${error.message}`, true),
+    onError: (error: Error, node: string) =>
+      setStatus(`${entry.name} ${node}: ${error.message}`, true),
   };
 }
 
@@ -771,8 +934,8 @@ filesInput.addEventListener('change', () => {
     setStatus(error instanceof Error ? error.message : String(error), true);
     return;
   }
-  decodedAttributes = undefined;
-  void openCloud(() => loadPotreeV2FromFiles(files, loadOptions()), 'ローカルファイル');
+  // Renamed after metadata.json's name once loaded.
+  addEntry('ローカルファイル', (options) => loadPotreeV2FromFiles(files, options));
 });
 
 renderer.domElement.addEventListener('pointermove', (event) => {
@@ -837,10 +1000,11 @@ function animate() {
     const changed = renderRequested;
     renderRequested = false;
     profiler.measure(() => {
-      if (settings.edl && cloud) {
+      const targets = loadedClouds();
+      if (settings.edl && targets.length > 0) {
         edl.strength = settings.edlStrength;
         edl.radius = settings.edlRadius;
-        edl.render(renderer, scene, camera, [cloud]);
+        edl.render(renderer, scene, camera, targets);
       } else {
         renderer.render(scene, camera);
       }
@@ -856,12 +1020,14 @@ function animate() {
   startPick();
 }
 animate();
-actions.loadUrl();
+for (const url of initialUrls) {
+  addEntry(nameFromUrl(url), (options) => loadPotreeV2(url, options), url);
+}
 
 window.addEventListener('beforeunload', () => {
   cancelAnimationFrame(frame);
   resize.disconnect();
-  cloud?.dispose();
+  for (const target of loadedClouds()) target.dispose();
   edges.dispose();
   controls.dispose();
   profiler.dispose();
