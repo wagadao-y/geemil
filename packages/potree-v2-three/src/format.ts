@@ -177,5 +177,12 @@ export function validateMetadata(value: unknown): PotreeV2Metadata {
       throw new Error(`Invalid Potree v2 attribute: ${a.name}`);
     }
   }
+  // The decoders read these two as PotreeConverter writes them, in both encodings.
+  for (const [name, type] of [['position', 'int32'], ['rgb', 'uint16']] as const) {
+    const a = m.attributes.find(attribute => attribute.name === name);
+    if (a && (a.type !== type || a.numElements !== 3)) {
+      throw new Error(`Unsupported Potree v2 ${name} attribute: expected 3 × ${type}, got ${a.numElements} × ${a.type}`);
+    }
+  }
   return m;
 }

@@ -182,6 +182,20 @@ test('decodes Brotli Morton positions and colors', async () => {
   geometry.dispose();
 });
 
+test('rejects position and rgb attributes in types the decoders do not read', () => {
+  const [position, rgb] = base.attributes;
+  const withAttributes = (...attributes) => ({ ...base, attributes });
+  const invalid = [
+    [withAttributes({ ...position, type: 'uint32' }, rgb), /position attribute: expected 3 × int32, got 3 × uint32/],
+    [withAttributes({ ...position, type: 'double', size: 24, elementSize: 8 }, rgb), /position.*3 × double/],
+    [withAttributes(position, { ...rgb, type: 'uint8', size: 3, elementSize: 1 }), /rgb attribute: expected 3 × uint16, got 3 × uint8/],
+    [withAttributes(position, { ...rgb, size: 8, numElements: 4 }), /rgb.*4 × uint16/],
+  ];
+  for (const [metadata, error] of invalid) assert.throws(() => validateMetadata(metadata), error);
+  // rgb is optional.
+  assert.doesNotThrow(() => validateMetadata(withAttributes(position)));
+});
+
 test('the metadata rgb maximum decides 8- or 16-bit colors for the whole dataset', async () => {
   const withMax = max => ({
     ...base,

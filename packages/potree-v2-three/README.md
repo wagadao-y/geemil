@@ -2,7 +2,7 @@
 
 PotreeConverter **2.0** の `metadata.json`, `hierarchy.bin`, `octree.bin` を Three.js で表示するライブラリです。Potree v1 と Potree-Next v3 は対象外です。
 
-`metadata.json` の `encoding` は、無圧縮の `DEFAULT` と Brotli 圧縮の `BROTLI` に対応しています。それ以外の値は読み込み時にエラーになります。
+`metadata.json` の `encoding` は、無圧縮の `DEFAULT` と Brotli 圧縮の `BROTLI` に対応しています。それ以外の値は読み込み時にエラーになります。属性は PotreeConverter の出力どおり、`position` が int32 × 3、`rgb` が uint16 × 3 であることを前提とし、ほかの型も読み込み時にエラーになります。
 
 ## 使い方
 
