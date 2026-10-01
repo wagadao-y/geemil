@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Color, Group, Mesh, PerspectiveCamera, Scene } from 'three';
+import { Color, Group, Mesh, PerspectiveCamera, Scene, Vector4 } from 'three';
 import { PotreeV2EDL } from '../dist/edl.js';
 
 /** Records what each render call would draw, without WebGL. */
 function mockRenderer() {
   const calls = [];
   let target = null;
+  const viewport = new Vector4(0, 0, 640, 480);
+  const cssViewport = new Vector4(0, 0, 320, 240);
   const visibleNames = root => {
     const names = [];
     root.traverseVisible(object => { if (object.name) names.push(object.name); });
@@ -16,7 +18,10 @@ function mockRenderer() {
     autoClear: true,
     capabilities: { logarithmicDepthBuffer: false },
     getRenderTarget: () => target,
-    setRenderTarget: value => { target = value; },
+    setRenderTarget: value => { target = value; viewport.copy(value?.viewport ?? cssViewport.clone().multiplyScalar(2)); },
+    getCurrentViewport: value => value.copy(viewport),
+    getViewport: value => value.copy(cssViewport),
+    setViewport: value => { cssViewport.copy(value); viewport.copy(value).multiplyScalar(2); },
     getDrawingBufferSize: size => size.set(640, 480),
     getPixelRatio: () => 2,
     getClearColor: color => color.set(0x123456),
@@ -30,6 +35,7 @@ function mockRenderer() {
         background: scene.background ?? null,
         autoClear: renderer.autoClear,
         camera,
+        viewport: viewport.clone(),
       });
     },
   };
@@ -92,5 +98,22 @@ test('EDL without visible clouds renders the scene once', () => {
   edl.render(renderer, scene, new PerspectiveCamera(), [{ group: cloudGroup }]);
   assert.equal(calls.length, 1);
   assert.equal(cloudGroup.visible, false);
+  edl.dispose();
+});
+
+test('EDL sizes its target to the current viewport and restores it before compositing', () => {
+  const scene = new Scene();
+  const group = new Group();
+  scene.add(group);
+  const { renderer, calls } = mockRenderer();
+  renderer.setViewport(new Vector4(40, 20, 150, 100));
+  const original = renderer.getCurrentViewport(new Vector4());
+  const edl = new PotreeV2EDL();
+  edl.render(renderer, scene, new PerspectiveCamera(), [{ group }]);
+  assert.deepEqual(calls.map(call => call.viewport.toArray()), [
+    original.toArray(), [0, 0, 300, 200], original.toArray(),
+  ]);
+  assert.deepEqual(edl.material.uniforms.resolution.value.toArray(), [300, 200]);
+  assert.deepEqual(renderer.getCurrentViewport(new Vector4()), original);
   edl.dispose();
 });

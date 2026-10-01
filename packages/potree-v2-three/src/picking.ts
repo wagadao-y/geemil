@@ -1,9 +1,10 @@
 import {
   BufferGeometry, Color, Frustum, GLSL3, Matrix4, NearestFilter, Points, RGBAIntegerFormat, Scene,
-  ShaderMaterial, UnsignedIntType, Vector2, WebGLRenderTarget,
+  ShaderMaterial, UnsignedIntType, Vector2, Vector4, WebGLRenderTarget,
 } from 'three';
 import type { Camera, OrthographicCamera, PerspectiveCamera, Texture, WebGLRenderer } from 'three';
 import type { OctreeNode } from './format.js';
+import { restoreViewport } from './viewport.js';
 import { ClipUniforms, clipVertex, clipVertexPars } from './clipping.js';
 import type { NodeClip } from './clipping.js';
 import { classificationDefines, classificationVertex, classificationVertexPars } from './point-color.js';
@@ -195,6 +196,8 @@ export class PointPicker {
   private readonly frustum = new Frustum();
   private readonly projection = new Matrix4();
   private readonly drawingBuffer = new Vector2();
+  private readonly viewport = new Vector4();
+  private readonly restoredViewport = new Vector4();
   private readonly clearColor = new Color();
 
   /** The picker shared by every cloud, created on first use and disposed with the last release(). */
@@ -226,6 +229,7 @@ export class PointPicker {
    * `x`, `y` are CSS pixels from the canvas' top-left corner, and `radius` is CSS pixels too.
    * With radius 0 only a point drawn under that pixel hits. The layers are drawn together
    * with depth testing, so a point hidden behind another cloud's points is not hit.
+   * Uses the current viewport and the displayed Points' camera layers.
    */
   async pick<Owner>(
     renderer: WebGLRenderer, camera: Camera, layers: readonly PickLayer<Owner>[],
@@ -235,7 +239,21 @@ export class PointPicker {
     const gl = renderer.getContext();
     if (!(gl instanceof WebGL2RenderingContext) || gl.isContextLost()) return null;
     const pixelRatio = renderer.getPixelRatio();
-    const { x: bufferWidth, y: bufferHeight } = renderer.getDrawingBufferSize(this.drawingBuffer);
+    // The pixels of the current output: the canvas, or a render target taken as the canvas at the pixel ratio.
+    const output = renderer.getRenderTarget();
+    const { x: bufferWidth, y: bufferHeight } = output
+      ? this.drawingBuffer.set(output.width, output.height)
+      : renderer.getDrawingBufferSize(this.drawingBuffer);
+    const viewport = renderer.getCurrentViewport(this.viewport);
+    // Renderer viewports use device pixels from the bottom-left; pick coordinates use the top-left.
+    const vx = viewport.x;
+    const vy = bufferHeight - viewport.y - viewport.w;
+    const vw = viewport.z;
+    const vh = viewport.w;
+    const left = Math.max(0, vx);
+    const top = Math.max(0, vy);
+    const right = Math.min(bufferWidth, vx + vw);
+    const bottom = Math.min(bufferHeight, vy + vh);
     const cx = x * pixelRatio;
     const cy = y * pixelRatio;
     const r = Math.max(0, radius) * pixelRatio;
@@ -246,18 +264,18 @@ export class PointPicker {
     }));
 
     // Pixels searched for hits, in device pixels from the top-left corner.
-    const innerX0 = Math.max(0, Math.floor(cx - r));
-    const innerY0 = Math.max(0, Math.floor(cy - r));
-    const innerX1 = Math.min(bufferWidth, Math.floor(cx + r) + 1);
-    const innerY1 = Math.min(bufferHeight, Math.floor(cy + r) + 1);
+    const innerX0 = Math.max(left, Math.floor(cx - r));
+    const innerY0 = Math.max(top, Math.floor(cy - r));
+    const innerX1 = Math.min(right, Math.floor(cx + r) + 1);
+    const innerY1 = Math.min(bottom, Math.floor(cy + r) + 1);
     if (innerX1 <= innerX0 || innerY1 <= innerY0) return null;
     // A point is clipped when its centre leaves the view, so render half a point
-    // beyond the searched pixels. Stay inside the canvas, as the display does.
+    // beyond the searched pixels. Stay inside the viewport, as the display does.
     const margin = Math.ceil(size / 2);
-    const x0 = Math.max(0, innerX0 - margin);
-    const y0 = Math.max(0, innerY0 - margin);
-    const x1 = Math.min(bufferWidth, innerX1 + margin);
-    const y1 = Math.min(bufferHeight, innerY1 + margin);
+    const x0 = Math.max(left, innerX0 - margin);
+    const y0 = Math.max(top, innerY0 - margin);
+    const x1 = Math.min(right, innerX1 + margin);
+    const y1 = Math.min(bottom, innerY1 + margin);
     const width = x1 - x0;
     const height = y1 - y0;
 
@@ -266,8 +284,16 @@ export class PointPicker {
     const pickCamera = new (camera.constructor as new () => PickCamera)().copy(camera as never, false) as PickCamera;
     // Keep the copied world matrices; recomputing them would drop a parent's transform.
     pickCamera.matrixWorldAutoUpdate = false;
-    pickCamera.setViewOffset(bufferWidth, bufferHeight, x0, y0, width, height);
-    pickCamera.updateProjectionMatrix();
+    // Crop the existing projection to this region of the viewport. Keeping the original
+    // projection also preserves its aspect, any camera view offset, and custom projections.
+    const crop = new Matrix4().set(
+      vw / width, 0, 0, (vw - 2 * (x0 - vx) - width) / width,
+      0, vh / height, 0, (2 * (y0 - vy) + height - vh) / height,
+      0, 0, 1, 0,
+      0, 0, 0, 1,
+    );
+    pickCamera.projectionMatrix.premultiply(crop);
+    pickCamera.projectionMatrixInverse.copy(pickCamera.projectionMatrix).invert();
 
     // Snapshot the drawn targets: the proxies may be reused by another pick while this one waits.
     const drawn: Drawn<Owner>[] = [];
@@ -281,7 +307,8 @@ export class PointPicker {
       // makes nodes of equal distance draw in the same order as displayed.
       const targets = [...layer.targets].sort((a, b) => a.points.id - b.points.id);
       for (const target of targets) {
-        if (!this.frustum.intersectsBox(target.node.box)) continue;
+        if (!target.points.visible || !target.points.layers.test(camera.layers) ||
+          !this.frustum.intersectsBox(target.node.box)) continue;
         if (!shader) {
           shader = this.shader(layer.display);
           shader.sync(layer.display, pixelRatio, height);
@@ -289,6 +316,7 @@ export class PointPicker {
         const proxy = this.proxy(drawn.length);
         proxy.geometry = target.points.geometry;
         proxy.material = shader.material;
+        proxy.layers.mask = target.points.layers.mask;
         proxy.matrixWorld.multiplyMatrices(layer.groupMatrix, target.points.matrix);
         const item = { layer, target, shader };
         this.drawing[drawn.length] = item;
@@ -300,7 +328,6 @@ export class PointPicker {
     orderAsDisplayed(drawn, this.proxies);
 
     const pixels = new Uint32Array(width * height * 4);
-    const previousTarget = renderer.getRenderTarget();
     const previousClearColor = renderer.getClearColor(this.clearColor);
     const previousClearAlpha = renderer.getClearAlpha();
     const previousAutoClear = renderer.autoClear;
@@ -324,7 +351,8 @@ export class PointPicker {
     } finally {
       renderer.autoClear = previousAutoClear;
       renderer.setClearColor(previousClearColor, previousClearAlpha);
-      renderer.setRenderTarget(previousTarget);
+      renderer.setRenderTarget(output);
+      restoreViewport(renderer, viewport, this.restoredViewport);
       this.scene.clear();
       for (let i = 0; i < drawn.length; i++) this.proxies[i]!.geometry = this.emptyGeometry;
       this.drawing.length = 0;

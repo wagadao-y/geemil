@@ -178,10 +178,10 @@ test('DEFAULT and BROTLI encodings draw the same pixels', async ({ page }) => {
 
 test('clouds sharing a shader program keep their own clips on every frame', async ({ page }) => {
   // Only the roots, then the whole view.
-  for (const pointBudget of [1, 10_000_000]) {
-    const result = await page.evaluate(([url, pointBudget]) => window.harness.sharedProgramClipping(url, pointBudget), [BROTLI, pointBudget] as const)
+  for (const rootOnly of [true, false]) {
+    const result = await page.evaluate(([url, rootOnly]) => window.harness.sharedProgramClipping(url, rootOnly), [BROTLI, rootOnly] as const)
     expect(result.sharedProgram).toBe(true)
-    if (pointBudget === 1) expect(result.nodes).toEqual([1, 1])
+    if (rootOnly) expect(result.nodes).toEqual([1, 1])
     expect(result.drawn[0]).toBeGreaterThan(100)
     expect(result.drawn[1]).toBeGreaterThan(100)
     expect(result.differing).toEqual([0, 0, 0])
@@ -225,3 +225,24 @@ test('orthographic picks match flat sibling points with equal depths and reverse
     node: 'r0', color: result.drawn, height: 2,
   })))
 })
+
+for (const [name, left, bottom, width, height, ratio, layer, options] of [
+  ['left half', 0, 0, 150, 300, 1, 0, {}],
+  ['offset viewport at high DPI', 150, 75, 150, 150, 2, 0, {}],
+  // 151 × 1.5 rounds up in setViewport() but down in setRenderTarget(null).
+  ['odd viewport at a fractional pixel ratio', 1, 1, 151, 151, 1.5, 0, {}],
+  ['layer 2', 0, 0, 300, 300, 1, 2, {}],
+  ['perspective viewport with camera view offset', 0, 0, 150, 300, 1, 0, { perspective: true, viewOffset: true }],
+  ['render target viewport at high DPI', 150, 75, 150, 150, 2, 0, { renderTarget: true }],
+] as const) {
+  test(`picking and EDL match a point in ${name}`, async ({ page }) => {
+    const result = await page.evaluate(args => window.harness.viewportPoint(...args),
+      [FLAT_SIBLINGS, left, bottom, width, height, ratio, layer, options] as const)
+    expect(result.direct).toBe(100 * ratio * ratio)
+    expect.soft(result.hit).toBe('r')
+    expect.soft(result.empty).toBeNull()
+    expect.soft(result.excluded).toBeNull()
+    expect.soft(result.edl).toBe(result.direct)
+    expect(result.viewportRestored).toBe(true)
+  })
+}

@@ -453,6 +453,8 @@ export class PotreeV2PointCloud {
   private lastCachePointBudget = NaN;
   private lastMinNodePixelSize = NaN;
   private lastShowBoundingBoxes = false;
+  /** `group.layers` last given to the node objects. */
+  private layersMask = this.group.layers.mask;
   /** `group` and all its ancestors were visible at the last update. */
   private shown = true;
   private lastClipping: PotreeV2Clipping | null = null;
@@ -914,6 +916,7 @@ export class PotreeV2PointCloud {
     points.updateMatrix();
     points.visible = false;
     points.frustumCulled = false;
+    points.layers.mask = this.layersMask;
     // Every node draws with the shared material, so its clips are uploaded right before its draw.
     points.onBeforeRender = () => this.material.setNode(node, this.nodeClips.get(node) ?? NO_CLIP, node.box.min);
     this.group.add(points);
@@ -935,6 +938,7 @@ export class PotreeV2PointCloud {
       node.box.getCenter(helper.position);
       node.box.getSize(helper.scale);
       helper.frustumCulled = false; // The corresponding points were already selected.
+      helper.layers.mask = this.layersMask;
       this.group.add(helper);
       state.boxHelper = helper;
     }
@@ -1079,8 +1083,10 @@ export class PotreeV2PointCloud {
 
   /**
    * Recompute visible nodes and start background loads. Call once per render frame.
-   * Returns true when the scene changed and should be rendered again. When the view,
-   * viewport and settings are unchanged and all loads have settled, the traversal is skipped.
+   * Returns true when nodes, clipping or layers changed and should be rendered again.
+   * After changing materials (size, color, classification, etc.), request a render in the application.
+   * When the view, viewport and settings are unchanged and all loads have settled, the traversal is skipped.
+   * Node objects take the layers of `group`.
    * While `group` or an ancestor is hidden, nothing is selected or loaded.
    * A cloud added to a PotreeV2PointCloudSet is updated through the set instead.
    */
@@ -1108,12 +1114,14 @@ export class PotreeV2PointCloud {
     // From the parents down: a camera in a rig moved since the last render has stale matrices.
     camera.updateWorldMatrix(true, false);
     let unchanged = !force;
+    let layersChanged = false;
     for (const cloud of active) {
+      if (cloud.syncLayers()) layersChanged = true;
       if (!cloud.prepareView(camera, viewportHeight, pointBudget, cachePointBudget)) unchanged = false;
     }
     if (unchanged) {
       for (const cloud of active) cloud.finishLoadDiagnostics();
-      return false;
+      return layersChanged;
     }
     const stamp = ++displayStamp;
     // One heap across clouds: the budget goes to the largest projected nodes of any cloud, as in Potree.
@@ -1132,7 +1140,7 @@ export class PotreeV2PointCloud {
         if (node.numPoints > 0) {
           // Candidates arrive largest first, so every remaining node would be less
           // important than the one that no longer fits: stop, as Potree does.
-          if (pointsUsed + node.numPoints > pointBudget && selectedCount > 0) break;
+          if (pointsUsed + node.numPoints > pointBudget) break;
           pointsUsed += node.numPoints;
           cloud.selectionRank.set(node, selectedCount++);
           traversal.selected.add(node);
@@ -1163,7 +1171,19 @@ export class PotreeV2PointCloud {
     for (const { cloud, sceneReady } of traversals) {
       cloud.settled = sceneReady && cloud.decodedQueue.length === 0 && cloud.inFlight === 0 && cloud.activeLoads === 0;
     }
-    return changed;
+    return changed || layersChanged;
+  }
+
+  /** Give the node objects the layers of `group`; returns true when they changed. */
+  private syncLayers(): boolean {
+    const mask = this.group.layers.mask;
+    if (mask === this.layersMask) return false;
+    this.layersMask = mask;
+    for (const state of this.states.values()) {
+      if (state.points) state.points.layers.mask = mask;
+      if (state.boxHelper) state.boxHelper.layers.mask = mask;
+    }
+    return true;
   }
 
   /** Compute this frame's view; returns true when it and the settings match a settled previous update. */

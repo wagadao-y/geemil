@@ -1,9 +1,9 @@
 // Renders one point cloud at a fixed view for the Playwright tests; they call `window.harness`.
 import {
-  loadPotreeV2, PotreeV2Clipping, PotreeV2Gradients, PotreeV2PointCloudSet, type PotreeV2Options,
+  loadPotreeV2, PotreeV2EDL, PotreeV2Clipping, PotreeV2Gradients, PotreeV2PointCloudSet, type PotreeV2Options,
   type PotreeV2PointCloud, type PotreeV2PointColorType,
 } from '@geemil/potree-v2-three'
-import { OrthographicCamera, PerspectiveCamera, Plane, Scene, Vector3, WebGLRenderer, type Camera } from 'three'
+import { OrthographicCamera, PerspectiveCamera, Plane, Scene, Vector3, Vector4, WebGLRenderer, WebGLRenderTarget, type Camera } from 'three'
 
 const SIZE = 300
 
@@ -129,17 +129,17 @@ const harness = {
   /**
    * Draw two clouds of `url` side by side, with equal settings so that they share one shader
    * program, clipped by opposite planes. Returns, for each of several frames, the pixels that
-   * differ from the two clouds drawn alone, and the pixels each cloud draws alone. With a
-   * `pointBudget` of 1 each cloud draws only its root, so every frame starts with the node,
-   * and the clip, that the cloud drew last in the frame before.
+   * differ from the two clouds drawn alone, and the pixels each cloud draws alone. With `rootOnly`,
+   * each cloud budgets exactly its root point count and draws only its root, so every frame starts with the
+   * node and the clip, that the cloud drew last in the frame before.
    */
-  async sharedProgramClipping(url: string, pointBudget: number) {
+  async sharedProgramClipping(url: string, rootOnly: boolean) {
     if (cloud) {
       scene.remove(cloud.group)
       cloud.dispose()
       cloud = undefined
     }
-    const clouds = await Promise.all([0, 1].map(() => loadPotreeV2(url, { pointBudget, minNodePixelSize: 10 })))
+    const clouds = await Promise.all([0, 1].map(() => loadPotreeV2(url, { pointBudget: 10_000_000, minNodePixelSize: 10 })))
     try {
       const size = clouds[0]!.boundingBox.getSize(new Vector3())
       clouds[1]!.group.position.x = size.x * 1.5
@@ -147,6 +147,8 @@ const harness = {
       // Each plane cuts through the cloud, so some nodes test it and others need no clip.
       const planes = [new Plane(new Vector3(0, 0, 1), -middle), new Plane(new Vector3(0, 0, -1), middle)]
       clouds.forEach((current, i) => {
+        // The root count is internal; use its actual count rather than the old budget exception.
+        if (rootOnly) current.pointBudget = (current as unknown as { root: { numPoints: number } }).root.numPoints
         current.clipping = new PotreeV2Clipping()
         current.clipping.addPlane({ plane: planes[i]!, prune: false })
         scene.add(current.group)
@@ -324,6 +326,67 @@ const harness = {
     } finally {
       scene.remove(flat.group)
       flat.dispose()
+    }
+  },
+
+  /** One root point at the centre of a partial viewport, with optional camera layers. */
+  async viewportPoint(url: string, left: number, bottom: number, width: number, height: number, pixelRatio: number, layer: number,
+    options: { perspective?: boolean; viewOffset?: boolean; renderTarget?: boolean } = {}) {
+    const sample = await loadPotreeV2(url, { pointBudget: 1, pointSize: 10, pointColorType: 'solid' })
+    const view = options.perspective
+      ? new PerspectiveCamera(60, width / height, 0.1, 100)
+      : new OrthographicCamera(-4, 4, 4, -4, 0.1, 100)
+    view.position.set(7, 7, 20)
+    if (options.viewOffset) view.setViewOffset(600, 600, 100, 100, 300, 300)
+    view.layers.set(layer)
+    const localScene = new Scene()
+    localScene.add(sample.group)
+    renderer.setPixelRatio(pixelRatio)
+    renderer.setSize(SIZE, SIZE, false)
+    const output = options.renderTarget ? new WebGLRenderTarget(SIZE * pixelRatio, SIZE * pixelRatio) : null
+    if (output) {
+      output.viewport.set(left * pixelRatio, bottom * pixelRatio, width * pixelRatio, height * pixelRatio)
+      renderer.setRenderTarget(output)
+    } else renderer.setViewport(left, bottom, width, height)
+    const originalViewport = renderer.getCurrentViewport(new Vector4())
+    const originalCssViewport = renderer.getViewport(new Vector4())
+    const edl = new PotreeV2EDL({ strength: 0 })
+    try {
+      // Node objects take the group's layers, including those created by update().
+      sample.group.layers.set(layer)
+      sample.update(view, height)
+      const measure = () => {
+        const context = renderer.getContext()
+        const pixels = new Uint8Array(SIZE * SIZE * pixelRatio * pixelRatio * 4)
+        if (output) renderer.readRenderTargetPixels(output, 0, 0, SIZE * pixelRatio, SIZE * pixelRatio, pixels)
+        else context.readPixels(0, 0, SIZE * pixelRatio, SIZE * pixelRatio, context.RGBA, context.UNSIGNED_BYTE, pixels)
+        let drawn = 0
+        for (let i = 0; i < pixels.length; i += 4) if (pixels[i] || pixels[i + 1] || pixels[i + 2]) drawn++
+        return drawn
+      }
+      renderer.render(localScene, view)
+      const direct = measure()
+      const projected = new Vector3(7, 7, 2).project(view)
+      const x = left + (projected.x + 1) * width / 2
+      const y = SIZE - bottom - (projected.y + 1) * height / 2
+      const hit = await sample.pick(renderer, view, x, y)
+      const empty = await sample.pick(renderer, view, width === SIZE ? 0 : SIZE / 2, height === SIZE ? SIZE / 2 : 0)
+      view.layers.set(layer === 0 ? 2 : 0)
+      const excluded = await sample.pick(renderer, view, x, y)
+      view.layers.set(layer)
+      edl.render(renderer, localScene, view, [sample])
+      return {
+        direct, edl: measure(), hit: hit?.node ?? null, empty: empty?.node ?? null, excluded: excluded?.node ?? null,
+        viewportRestored: renderer.getCurrentViewport(new Vector4()).equals(originalViewport) &&
+          renderer.getViewport(new Vector4()).equals(originalCssViewport),
+      }
+    } finally {
+      edl.dispose()
+      sample.dispose()
+      renderer.setRenderTarget(null)
+      output?.dispose()
+      renderer.setPixelRatio(1)
+      renderer.setSize(SIZE, SIZE, false)
     }
   },
 

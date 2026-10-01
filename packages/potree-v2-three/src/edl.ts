@@ -1,8 +1,9 @@
 import {
   Color, DepthTexture, FloatType, HalfFloatType, Mesh, NearestFilter, OrthographicCamera, PlaneGeometry,
-  ShaderMaterial, Vector2, WebGLRenderTarget,
+  ShaderMaterial, Vector2, Vector4, WebGLRenderTarget,
 } from 'three';
 import type { Camera, Object3D, Scene, WebGLRenderer } from 'three';
+import { restoreViewport } from './viewport.js';
 
 export interface PotreeV2EDLOptions {
   /** Shading strength. Default: 0.4, as Potree's viewer sets it. */
@@ -101,6 +102,8 @@ export class PotreeV2EDL {
   private readonly quad = new Mesh(new PlaneGeometry(2, 2), this.material);
   private readonly quadCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private readonly size = new Vector2();
+  private readonly viewport = new Vector4();
+  private readonly restored = new Vector4();
   private readonly clearColor = new Color();
   private readonly hidden: Object3D[] = [];
 
@@ -112,13 +115,13 @@ export class PotreeV2EDL {
 
   /**
    * Render `scene` with EDL on the `clouds` (their `group`s must be in `scene`) into the
-   * renderer's current target. `renderer.autoClear` applies to the scene as usual.
+   * renderer's current target and viewport. `renderer.autoClear` applies to the scene as usual.
    */
   render(renderer: WebGLRenderer, scene: Scene, camera: Camera, clouds: Iterable<{ group: Object3D }>): void {
     const groups = [...clouds].map(cloud => cloud.group).filter(group => group.visible);
     const output = renderer.getRenderTarget();
-    if (output) this.size.set(output.width, output.height);
-    else renderer.getDrawingBufferSize(this.size);
+    const viewport = renderer.getCurrentViewport(this.viewport);
+    this.size.set(viewport.z, viewport.w);
 
     // The scene without the clouds.
     for (const group of groups) group.visible = false;
@@ -149,6 +152,7 @@ export class PotreeV2EDL {
       scene.background = background;
       renderer.setClearColor(this.clearColor, clearAlpha);
       renderer.setRenderTarget(output);
+      restoreViewport(renderer, viewport, this.restored);
     }
 
     // Shade and composite, keeping the clouds' depth so the scene still occludes them.

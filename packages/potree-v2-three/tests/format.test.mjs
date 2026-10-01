@@ -967,6 +967,51 @@ test('stops selecting once the most important remaining node exceeds the point b
   }
 });
 
+test('point budget excludes even the first node when it does not fit', async () => {
+  const { fetcher } = flakyCloudFetcher(childFiles, {});
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, pointBudget: 0 });
+  try {
+    const camera = childViewCamera();
+    cloud.update(camera, 600);
+    assert.equal(cloud.loadDiagnostics.requiredNodes, 0);
+    assert.equal(cloud.group.children.filter(child => child.type === 'Points' && child.visible).length, 0);
+    cloud.pointBudget = 0.5;
+    cloud.update(camera, 600);
+    assert.equal(cloud.loadDiagnostics.requiredNodes, 0);
+    cloud.pointBudget = 1;
+    cloud.update(camera, 600);
+    assert.equal(cloud.loadDiagnostics.requiredNodes, 1);
+    cloud.pointBudget = 0;
+    assert.equal(cloud.update(camera, 600), true);
+    assert.equal(cloud.group.children.filter(child => child.type === 'Points' && child.visible).length, 0);
+  } finally {
+    cloud.dispose();
+  }
+});
+
+test('node objects take the group layers, including nodes loaded later and layer changes', async () => {
+  const { fetcher } = flakyCloudFetcher(childFiles, {});
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher, minNodePixelSize: 1, showBoundingBoxes: true,
+  });
+  try {
+    const camera = childViewCamera();
+    cloud.group.layers.set(2);
+    await waitFor(() => { cloud.update(camera, 600); return cloud.group.children.filter(child => child.isPoints).length === 2; });
+    cloud.update(camera, 600);
+    const masks = () => cloud.group.children.map(child => child.layers.mask);
+    assert.equal(cloud.group.children.length, 4);
+    assert.deepEqual(masks(), [4, 4, 4, 4]);
+    assert.equal(cloud.update(camera, 600), false);
+    cloud.group.layers.enable(3);
+    assert.equal(cloud.update(camera, 600), true);
+    assert.deepEqual(masks(), [12, 12, 12, 12]);
+    assert.equal(cloud.update(camera, 600), false);
+  } finally {
+    cloud.dispose();
+  }
+});
+
 test('aborts octree requests the view stopped needing and requests them again later', async () => {
   let hang = true;
   const { fetcher: files } = flakyCloudFetcher(childFiles, {});
@@ -1374,6 +1419,11 @@ test('update skips unchanged settled views and reports scene changes', async () 
     const updateLoadDiagnostics = cloud.updateLoadDiagnostics.bind(cloud);
     cloud.updateLoadDiagnostics = (...args) => { traversals++; return updateLoadDiagnostics(...args); };
     assert.equal(cloud.update(camera, 600), false);
+    assert.equal(cloud.update(camera, 600), false);
+    assert.equal(traversals, 0);
+
+    // Material changes require the application to request a render (documented API contract).
+    cloud.material.size = 10;
     assert.equal(cloud.update(camera, 600), false);
     assert.equal(traversals, 0);
 

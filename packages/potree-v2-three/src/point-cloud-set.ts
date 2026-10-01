@@ -92,7 +92,8 @@ export class PotreeV2PointCloudSet {
 
   /**
    * Recompute visible nodes of every cloud and start background loads. Call once per
-   * render frame. Returns true when any cloud's scene changed and should be rendered again.
+   * render frame. Returns true when any cloud's nodes, clipping or layers changed.
+   * After changing materials, request a render in the application.
    */
   update(camera: Camera, viewportHeight: number): boolean {
     const force = this.membershipChanged;
