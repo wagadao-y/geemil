@@ -1755,3 +1755,142 @@ test('a cloud copies no payloads for a cache when its set disables the encoded c
     cloud.dispose();
   }
 });
+
+test('an aborted signal rejects the load with its reason before any request', async () => {
+  const requests = [];
+  const reason = new Error('page closed');
+  await assert.rejects(
+    loadPotreeV2('https://example.test/cloud/metadata.json', {
+      fetch: async url => { requests.push(String(url)); throw new Error('unexpected request'); },
+      signal: AbortSignal.abort(reason),
+    }),
+    error => error === reason,
+  );
+  assert.deepEqual(requests, []);
+});
+
+test('aborting the signal abandons a pending metadata request', async () => {
+  const controller = new AbortController();
+  let metadataSignal;
+  const load = loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: (url, init) => new Promise((resolve, reject) => {
+      metadataSignal = init.signal;
+      init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+    }),
+    signal: controller.signal,
+  });
+  await waitFor(() => metadataSignal !== undefined);
+  controller.abort();
+  await assert.rejects(load, { name: 'AbortError' });
+  assert.equal(metadataSignal.aborted, true);
+});
+
+test('aborting the signal during the root load disposes the cloud and keeps no decoder Workers', async () => {
+  const { fetcher } = flakyCloudFetcher(childFiles, {});
+  const controller = new AbortController();
+  const reason = new Error('switched dataset');
+  let octreeSignal;
+  const load = loadPotreeV2('https://abort-root.test/cloud/metadata.json', {
+    fetch: (url, init) => {
+      if (!String(url).endsWith('octree.bin')) return fetcher(url, init);
+      octreeSignal = init.signal;
+      return new Promise((resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+      });
+    },
+    signal: controller.signal,
+  });
+  await waitFor(() => octreeSignal !== undefined);
+  controller.abort(reason);
+  await assert.rejects(load, error => error === reason);
+  assert.equal(octreeSignal.aborted, true);
+  const pool = DecoderPool.acquire(1);
+  try {
+    assert.equal(pool.references, 1);
+  } finally {
+    pool.release();
+  }
+});
+
+test('aborting the signal after the load resolved leaves the cloud loading', async () => {
+  const { fetcher } = flakyCloudFetcher(childFiles, {});
+  const controller = new AbortController();
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher, minNodePixelSize: 1, signal: controller.signal,
+  });
+  try {
+    controller.abort();
+    const camera = childViewCamera();
+    await waitFor(() => { cloud.update(camera, 600); return cloud.group.children.length === 2; });
+  } finally {
+    cloud.dispose();
+  }
+});
+
+/** Call update() like a render loop until `promise` settles. */
+async function updateUntil(promise, update) {
+  let done = false;
+  promise.then(() => { done = true; }, () => { done = true; });
+  await waitFor(() => { if (!done) update(); return done; });
+  return promise;
+}
+
+test('whenLoaded resolves at the update that finds the selected nodes in the scene', async () => {
+  const { fetcher } = flakyCloudFetcher(childFiles, {});
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, minNodePixelSize: 1 });
+  try {
+    assert.equal(cloud.loading, true);
+    const camera = childViewCamera();
+    await updateUntil(cloud.whenLoaded(), () => cloud.update(camera, 600));
+    assert.equal(cloud.loading, false);
+    assert.equal(cloud.group.children.length, 2);
+
+    // Settled already, but it still waits for the next update.
+    let resolved = false;
+    const next = cloud.whenLoaded().then(() => { resolved = true; });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(resolved, false);
+    cloud.update(camera, 600);
+    await next;
+
+    // A view that needs no other node is loaded at its first update.
+    camera.position.z = 19;
+    cloud.update(camera, 600);
+    assert.equal(cloud.loading, false);
+  } finally {
+    cloud.dispose();
+  }
+  assert.equal(cloud.loading, false);
+});
+
+test('whenLoaded rejects on dispose and when its signal aborts', async () => {
+  const { fetcher } = flakyCloudFetcher(childFiles, {});
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, minNodePixelSize: 1 });
+  const controller = new AbortController();
+  const reason = new Error('cancelled');
+  const aborted = cloud.whenLoaded({ signal: controller.signal });
+  controller.abort(reason);
+  await assert.rejects(aborted, error => error === reason);
+  const pending = cloud.whenLoaded();
+  cloud.dispose();
+  await assert.rejects(pending, { name: 'AbortError' });
+  await assert.rejects(cloud.whenLoaded(), { name: 'AbortError' });
+});
+
+test('a set is loading until every cloud is, and whenLoaded resolves at the set\'s update', async () => {
+  const clouds = await loadChildClouds(2);
+  const set = new PotreeV2PointCloudSet();
+  try {
+    assert.equal(set.loading, false);
+    for (const cloud of clouds) set.add(cloud);
+    assert.equal(set.loading, true);
+    const camera = childViewCamera();
+    const cloudLoaded = clouds[0].whenLoaded();
+    await updateUntil(set.whenLoaded(), () => set.update(camera, 600));
+    await cloudLoaded;
+    assert.equal(set.loading, false);
+    assert.deepEqual(clouds.map(cloud => cloud.group.children.length), [2, 2]);
+  } finally {
+    for (const cloud of clouds) cloud.dispose();
+  }
+});

@@ -1,6 +1,7 @@
 import type { Camera, WebGLRenderer } from 'three';
 import { EncodedNodeCache } from './encoded-cache.js';
-import { cloudSets, LoadSlots, pickPointClouds, updatePointClouds } from './point-cloud.js';
+import { LoadWaiters } from './load-waiters.js';
+import { cloudSets, LoadSlots, pickPointClouds, updatePointClouds, validViewportHeight } from './point-cloud.js';
 import type { PotreeV2PickOptions, PotreeV2PickResult, PotreeV2PointCloud } from './point-cloud.js';
 
 export interface PotreeV2PointCloudSetOptions {
@@ -41,6 +42,7 @@ export class PotreeV2PointCloudSet {
   private readonly members: PotreeV2PointCloud[] = [];
   /** Membership changed: traverse even when every cloud's view is unchanged. */
   private membershipChanged = false;
+  private readonly loadWaiters = new LoadWaiters();
 
   constructor(options: PotreeV2PointCloudSetOptions = {}) {
     this.pointBudget = options.pointBudget ?? 2_000_000;
@@ -62,6 +64,17 @@ export class PotreeV2PointCloudSet {
   set cachePointBudget(value: number) { this.cachePointBudgetOverride = value; }
 
   get clouds(): readonly PotreeV2PointCloud[] { return this.members; }
+
+  /** True while any cloud of the set is `loading`; an empty set is not. */
+  get loading(): boolean { return this.members.some(cloud => cloud.loading); }
+
+  /**
+   * Resolves at the end of the next update() after which no cloud of the set is `loading`,
+   * as PotreeV2PointCloud.whenLoaded() does. Rejects with the signal's reason when `signal` aborts.
+   */
+  whenLoaded(options: { signal?: AbortSignal } = {}): Promise<void> {
+    return this.loadWaiters.wait(options.signal);
+  }
 
   /**
    * A cloud belongs to at most one set; disposing it removes it. The encoded nodes it cached
@@ -98,11 +111,13 @@ export class PotreeV2PointCloudSet {
   update(camera: Camera, viewportHeight: number): boolean {
     const force = this.membershipChanged;
     this.membershipChanged = false;
-    return updatePointClouds(this.members, camera, viewportHeight, {
+    const changed = updatePointClouds(this.members, camera, viewportHeight, {
       pointBudget: this.pointBudget, cachePointBudget: this.cachePointBudget,
       maxConcurrentLoads: this.maxConcurrentLoads, maxNodesToGPUPerFrame: this.maxNodesToGPUPerFrame,
       slots: this.slots,
     }, force);
+    if (validViewportHeight(viewportHeight) && !this.loading) this.loadWaiters.resolveAll();
+    return changed;
   }
 
   /**

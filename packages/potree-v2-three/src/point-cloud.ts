@@ -15,6 +15,7 @@ import { createRoot, parseHierarchyChunk, validateMetadata } from './format.js';
 import type { OctreeNode, PotreeV2Metadata } from './format.js';
 import { fetchRange, responseError } from './http.js';
 import { isThrottled, RequestGate, sleep } from './request-gate.js';
+import { LoadWaiters } from './load-waiters.js';
 import { PointPicker } from './picking.js';
 import type { PickHit, PickLayer, PickTarget } from './picking.js';
 import { PotreeV2PointMaterial } from './material.js';
@@ -92,6 +93,12 @@ export interface PotreeV2Options {
   retryDelayMs?: number;
   /** Override fetch, for authenticated or custom transports. */
   fetch?: typeof fetch;
+  /**
+   * Abandons loadPotreeV2() and loadPotreeV2FromFiles(): pending requests are aborted, the
+   * partly loaded cloud is disposed and the promise rejects with the signal's reason.
+   * Aborting after the promise resolved has no effect; dispose() the cloud instead.
+   */
+  signal?: AbortSignal;
   /**
    * Receives asynchronous errors from update-triggered loads. Throttled responses
    * (429, 503) are not reported: they pause requests to the origin and are retried.
@@ -485,6 +492,7 @@ export class PotreeV2PointCloud {
   private sceneReadySince: number | null = null;
   private requiredLastFrame = new Set<OctreeNode>();
   private picker?: PointPicker;
+  private readonly loadWaiters = new LoadWaiters();
   /** Admission shared with every cloud from the same origin. */
   private readonly gate: RequestGate;
   private disposed = false;
@@ -605,19 +613,51 @@ export class PotreeV2PointCloud {
     this.settled = false;
   }
 
+  /**
+   * True until an update() finds every node it selected in the scene, with no hierarchy chunk,
+   * range or decode of this cloud pending, and again from the next update() that needs more.
+   * It is decided by update() alone, so it is true before the first one and does not see a
+   * camera move until the next one. A node that keeps failing keeps it true; see onError.
+   * A hidden cloud selects nothing, so it is loaded at once. False once disposed.
+   */
+  get loading(): boolean { return !this.disposed && !this.settled; }
+
+  /**
+   * Resolves at the end of the next update() (or the set's update()) after which `loading` is
+   * false, for screenshots, tests or progress indicators. It waits for an update() even when
+   * `loading` is already false, since the view may have changed since the last one. Rejects
+   * with the signal's reason when `signal` aborts, and with an AbortError on dispose().
+   */
+  whenLoaded(options: { signal?: AbortSignal } = {}): Promise<void> {
+    if (this.disposed) return Promise.reject(new DOMException('The point cloud was disposed', 'AbortError'));
+    return this.loadWaiters.wait(options.signal);
+  }
+
   /** Resolves when metadata, the first hierarchy chunk and the root node are ready. */
   static async load(metadataUrl: string | URL, options: PotreeV2Options = {}): Promise<PotreeV2PointCloud> {
     const url = new URL(String(metadataUrl), globalThis.location?.href);
     const fetcher = options.fetch ?? fetch;
     const gate = RequestGate.for(url);
     const retryDelayMs = Math.max(0, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS);
-    const metadata = validateMetadata(await gate.retry(() => gate.request(async () => {
-      const response = await fetcher(url);
-      if (!response.ok) throw await responseError(url, response);
-      return response.json() as Promise<unknown>;
-    }, retryDelayMs), LOAD_ATTEMPTS));
+    const abortSignal = options.signal;
+    abortSignal?.throwIfAborted();
+    let metadata: PotreeV2Metadata;
+    try {
+      metadata = validateMetadata(await gate.retry(() => gate.request(async () => {
+        const response = await fetcher(url, { signal: abortSignal });
+        if (!response.ok) throw await responseError(url, response);
+        return response.json() as Promise<unknown>;
+      }, retryDelayMs, abortSignal), LOAD_ATTEMPTS, abortSignal));
+    } catch (error) {
+      // The gate's own waits reject with a plain AbortError; report the caller's reason.
+      abortSignal?.throwIfAborted();
+      throw error;
+    }
+    abortSignal?.throwIfAborted();
     const cloud = new PotreeV2PointCloud(url, metadata, options);
     const signal = cloud.controller.signal;
+    const abort = () => cloud.controller.abort(abortSignal!.reason);
+    abortSignal?.addEventListener('abort', abort, { once: true });
     try {
       await gate.retry(() => cloud.loadHierarchy(cloud.root), LOAD_ATTEMPTS, signal);
       if (cloud.root.numPoints > 0) {
@@ -629,10 +669,14 @@ export class PotreeV2PointCloud {
         }, LOAD_ATTEMPTS, signal);
         PotreeV2PointCloud.installDecodedNodes([cloud], Infinity);
       }
+      abortSignal?.throwIfAborted();
       return cloud;
     } catch (error) {
       cloud.dispose();
+      abortSignal?.throwIfAborted();
       throw error;
+    } finally {
+      abortSignal?.removeEventListener('abort', abort);
     }
   }
 
@@ -1110,7 +1154,7 @@ export class PotreeV2PointCloud {
     const { pointBudget, cachePointBudget } = limits;
     const active = clouds.filter(cloud => !cloud.disposed);
     if (active.length === 0) return false;
-    if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return false;
+    if (!validViewportHeight(viewportHeight)) return false;
     // From the parents down: a camera in a rig moved since the last render has stale matrices.
     camera.updateWorldMatrix(true, false);
     let unchanged = !force;
@@ -1120,7 +1164,10 @@ export class PotreeV2PointCloud {
       if (!cloud.prepareView(camera, viewportHeight, pointBudget, cachePointBudget)) unchanged = false;
     }
     if (unchanged) {
-      for (const cloud of active) cloud.finishLoadDiagnostics();
+      for (const cloud of active) {
+        cloud.finishLoadDiagnostics();
+        cloud.loadWaiters.resolveAll();
+      }
       return layersChanged;
     }
     const stamp = ++displayStamp;
@@ -1170,6 +1217,7 @@ export class PotreeV2PointCloud {
     if (PotreeV2PointCloud.evictLeastRecent(traversals, cachePointBudget)) changed = true;
     for (const { cloud, sceneReady } of traversals) {
       cloud.settled = sceneReady && cloud.decodedQueue.length === 0 && cloud.inFlight === 0 && cloud.activeLoads === 0;
+      if (cloud.settled) cloud.loadWaiters.resolveAll();
     }
     return changed || layersChanged;
   }
@@ -1502,6 +1550,7 @@ export class PotreeV2PointCloud {
     this.disposed = true;
     cloudSets.get(this)?.remove(this);
     this.controller.abort();
+    this.loadWaiters.abortAll();
     for (const request of this.fetchingRequests) request.controller.abort();
     this.fetchingRequests.clear();
     this.decoder.release();
@@ -1525,6 +1574,11 @@ export class PotreeV2PointCloud {
     this.levelOffsets.clear();
     if (this.boxResources) releaseBoxResources(this.boxResources);
   }
+}
+
+/** update() selects nothing for other heights, such as a canvas not laid out yet. */
+export function validViewportHeight(height: number): boolean {
+  return Number.isFinite(height) && height > 0;
 }
 
 /** False when `object` or any of its ancestors is hidden, so that Three.js does not draw it. */

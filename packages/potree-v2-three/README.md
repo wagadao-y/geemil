@@ -46,6 +46,15 @@ function render() {
 }
 ```
 
+読み込みが落ち着いたかは `cloud.loading` で分かります。`update()` が選んだノードがすべてシーンに追加され、この点群の階層チャンク・Range 取得・デコードが残っていなければ `false` になり、視点が変わって新しいノードが必要になった `update()` から再び `true` になります。判定するのは `update()` だけなので、最初の `update()` の前は `true` です。カメラを動かしても、次の `update()` までは値が変わりません。失敗を繰り返すノードがある間は `true` のままです（`onError` を参照してください）。非表示の点群はノードを選ばないので、すぐに `false` になります。`dispose()` した点群は `false` です。
+
+`cloud.whenLoaded()` は、`loading` が `false` になった `update()` の終わりで解決する Promise を返します。スクリーンショット、テスト、読み込み中の表示に使えます。前回の `update()` 以降に視点が変わっているかもしれないので、すでに `false` でも次の `update()` を待ちます。そのため、描画ループで `update()` を呼び続けてください。`{ signal }` を渡すと、中断したときにその reason で reject します。点群を `dispose()` すると `AbortError` で reject します。`PotreeV2PointCloudSet` にも同じ `loading` と `whenLoaded()` があり、セットのどの点群も `loading` でなくなった `update()` で解決します。
+
+```ts
+await cloud.whenLoaded(); // the render loop keeps calling cloud.update()
+const image = renderer.domElement.toDataURL();
+```
+
 `cloud.group` かその祖先の `visible` が `false` の間、`update()` はノードを選ばず、取得も点数予算の消費もしません（本家 Potree と同じです）。表示していたノードは非表示になり、復号済みキャッシュでは最近表示していないノードとして、ほかのノードより先に破棄されます。`visible` を戻すと、カメラが止まっていても次の `update()` で読み込みを再開します。
 
 同時に行う HTTP リクエスト（階層チャンクと octree の取得）は `maxConcurrentLoads`（初期値 6）、デコード用の Worker 数は `decoderWorkers`（初期値は論理コア数 - 1、1〜4）で指定します。Worker は全点群で 1 つのプールを共有し、生きている点群が指定した最大の数まで増えます。最後の点群を `dispose()` すると終了します。Worker が異常終了したり、Worker のスクリプトを読み込めなかったりした場合は、そのプールでのデコードがすべて失敗し、`onError` に渡されます。次の再試行からは、どの点群も新しいプールでデコードします。取得を終えたバッチはすぐにリクエストの枠を空けるので、Worker がデコードしている間も次のノードを取得できます。デコード待ち・デコード中のバッチが共有プール全体で Worker 数の 2 倍に達している間は、`loadPotreeV2()` でのルートノードの読み込みも含め、新しい取得を始めません。取得中のバッチはこの数に含めず `maxConcurrentLoads` で制限するので、Worker が少ない環境でもリクエストの枠をすべて使い、通信の待ち時間をデコードと重ねられます。取得が一度に終わった場合、Worker を待つバッチは最大で Worker 数の 2 倍と取得中だったバッチ数の合計になります。復号前キャッシュから再デコードするノードは、取得するノードとは別にまとめ、リクエストの枠を使わずにこの上限だけを守ります。サーバーは 3 ファイルにアクセス可能で、Range リクエストと CORS（別オリジンの場合）に対応させてください。`hierarchy.bin` と `octree.bin` の取得は HTTP 206 を受け付けます。ファイルの先頭からの範囲に 200 でファイル全体が返った場合は、ファイルの長さが要求した範囲とちょうど同じときだけ受け付けます（小さなデータで最初の階層チャンクがファイル全体になる場合など）。それ以外で Range を無視して 200 を返すサーバーはエラーになり、要求したバイト数を超えた時点で受信を打ち切ります。レスポンスの長さは `Content-Length` に頼らず、ボディを読みながら要求したバイト数と一致するかを確かめるので、chunked 転送や圧縮されたレスポンスでも要求サイズを超えて読み込みません。別オリジンで `Content-Range` を検証させたい場合は、`Access-Control-Expose-Headers: Content-Range` で公開してください（公開されていなければ検証を省略します）。
@@ -59,6 +68,15 @@ function render() {
 ノードや階層チャンクの読み込みに失敗すると `onError` が呼ばれ、`retryDelayMs`（初期値 1000）後の `update()` で再試行されます。待ち時間は失敗のたびに倍になり、最大 30 秒です。読み込みに成功すると元に戻ります。
 
 HTTP 429（Too Many Requests）と 503（Service Unavailable）は、ノードの失敗ではなくサーバーからの「控えてほしい」という合図として扱います。同じオリジンへのリクエストは、複数の点群をまたいで1つの窓口で管理します。429 か 503 を受けると、そのオリジンへの新しいリクエストをすべて止めます（実行中のリクエストは完了を待ちます）。再開までの時間は `Retry-After` があればその値（最大 5 分）、なければ `retryDelayMs` から倍々に延ばします（最大 30 秒）。同時に同時実行数の上限を半分に下げ、成功が続くと 1 ずつ戻します。止めている間に取得できなかったノードは、再開後の `update()` がその時点の視点で選び直して取得します。この場合 `onError` は呼ばれず、ノードごとの再試行の待ち時間も増えません。回数は `loadDiagnostics.throttledResponses` で確認できます。`loadPotreeV2()` 中の `metadata.json`、最初の階層チャンク、ルートノードの取得も、429・503 なら待ってから再試行します（最大 6 回）。別オリジンで `Retry-After` を使わせるには、サーバーで `Access-Control-Expose-Headers: Retry-After` を設定してください。また、CDN が 429 のレスポンスに CORS ヘッダーを付けないと、ブラウザはステータスを見せずにネットワークエラーとして扱うため、通常の失敗として `onError` と再試行の対象になります。
+
+`signal` オプションに `AbortSignal` を渡すと、`loadPotreeV2()` と `loadPotreeV2FromFiles()` を途中で中断できます。中断すると取得中のリクエストを止め、途中まで作った点群を `dispose()` し、Promise は signal の reason で reject します（`controller.abort()` なら `AbortError`）。最初から中断済みの signal なら何も取得しません。中断できるのは読み込みの Promise が解決するまでで、解決した後に中断しても点群には影響しません。その後は `dispose()` を使ってください。
+
+```ts
+const controller = new AbortController();
+const loading = loadPotreeV2(url, { signal: controller.signal });
+// e.g. the user picked another dataset
+controller.abort();
+```
 
 HTTP のエラーは `HttpError`（`status` と `retryAfterMs` を持ちます）として `onError` に渡されるので、404 などの内容に応じて処理を分けられます。
 

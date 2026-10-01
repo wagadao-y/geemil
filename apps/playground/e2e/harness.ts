@@ -37,6 +37,23 @@ export interface ColorSettings {
   intensityGamma?: number
 }
 
+/**
+ * Call `update` every 20 ms, as a render loop would, until `loaded` resolves; it gets a signal
+ * that aborts after `timeoutMs`.
+ */
+async function updateUntilLoaded(
+  loaded: (signal: AbortSignal) => Promise<unknown>, update: () => void, timeoutMs: number, message: string,
+) {
+  const promise = loaded(AbortSignal.timeout(timeoutMs))
+  let settled = false
+  promise.then(() => { settled = true }, () => { settled = true })
+  while (!settled) {
+    update()
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+  await promise.catch(() => { throw new Error(message) })
+}
+
 const harness = {
   /** Load `url` in place of the current cloud and wait until the fixed view is loaded. */
   async load(url: string, options: Pick<PotreeV2Options, 'attributes' | 'pointColorType'> = {}) {
@@ -52,12 +69,10 @@ const harness = {
     camera.up.set(0, 0, 1)
     camera.position.copy(center).add(new Vector3(0, -size * 0.8, size * 0.3))
     camera.lookAt(center)
-    const deadline = performance.now() + 60_000
-    while (cloud.loadDiagnostics.state !== 'complete') {
-      if (performance.now() > deadline) throw new Error('The view did not finish loading')
-      cloud.update(camera, SIZE)
-      await new Promise(resolve => setTimeout(resolve, 20))
-    }
+    const loading = cloud
+    await updateUntilLoaded(
+      signal => loading.whenLoaded({ signal }), () => loading.update(camera, SIZE), 60_000, 'The view did not finish loading',
+    )
     return {
       encoding: cloud.metadata.encoding,
       attributes: [...cloud.material.attributes],
@@ -158,12 +173,11 @@ const harness = {
       camera.up.set(0, 0, 1)
       camera.position.copy(center).add(new Vector3(0, -extent * 0.8, extent * 0.3))
       camera.lookAt(center)
-      const deadline = performance.now() + 60_000
-      while (clouds.some(current => current.loadDiagnostics.state !== 'complete')) {
-        if (performance.now() > deadline) throw new Error('The view did not finish loading')
-        for (const current of clouds) current.update(camera, SIZE)
-        await new Promise(resolve => setTimeout(resolve, 20))
-      }
+      await updateUntilLoaded(
+        signal => Promise.all(clouds.map(current => current.whenLoaded({ signal }))),
+        () => { for (const current of clouds) current.update(camera, SIZE) },
+        60_000, 'The view did not finish loading',
+      )
       const alone = clouds.map(current => {
         for (const other of clouds) other.group.visible = other === current
         return render()
@@ -245,12 +259,9 @@ const harness = {
         scene.add(current.group)
       }
       const target = far ? (logDepthRenderer ??= createLogDepthRenderer()) : renderer
-      const deadline = performance.now() + 60_000
-      while ([back!, front!].some(current => current.loadDiagnostics.state !== 'complete')) {
-        if (performance.now() > deadline) throw new Error('The view did not finish loading')
-        set.update(camera, SIZE)
-        await new Promise(resolve => setTimeout(resolve, 20))
-      }
+      await updateUntilLoaded(
+        signal => set.whenLoaded({ signal }), () => set.update(camera, SIZE), 60_000, 'The view did not finish loading',
+      )
       const pixels = render(target)
       const counts = { front: 0, back: 0, mismatched: 0, occluded: 0 }
       for (let y = 10; y < SIZE; y += 20) {
@@ -295,12 +306,10 @@ const harness = {
     overhead.position.set(4, 2, 20)
     scene.add(flat.group)
     try {
-      const deadline = performance.now() + 10_000
-      while (flat.loadDiagnostics.state !== 'complete') {
-        if (performance.now() > deadline) throw new Error('The flat sibling view did not finish loading')
-        flat.update(overhead, SIZE)
-        await new Promise(resolve => setTimeout(resolve, 20))
-      }
+      await updateUntilLoaded(
+        signal => flat.whenLoaded({ signal }), () => flat.update(overhead, SIZE), 10_000,
+        'The flat sibling view did not finish loading',
+      )
       const points = flat.group.children.filter(object => object.type === 'Points')
       const creationOrder = [...points].filter(object => object.name !== 'r')
         .sort((a, b) => a.id - b.id).map(object => object.name)
