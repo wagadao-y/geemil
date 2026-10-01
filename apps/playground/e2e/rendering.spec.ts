@@ -183,3 +183,13 @@ test('clouds sharing a shader program keep their own clips on every frame', asyn
     expect(result.differing).toEqual([0, 0, 0])
   }
 })
+
+test('a cloud set picks the nearest drawn point of any cloud', async ({ page }) => {
+  const counts = await page.evaluate(url => window.harness.pickAcrossClouds(url), BROTLI)
+  // Each pick hits the cloud drawn at its pixel, so a point behind the front cloud is not hit.
+  expect(counts.mismatched).toBe(0)
+  expect(counts.front).toBeGreaterThan(20)
+  expect(counts.back).toBeGreaterThan(20)
+  // Where the back cloud alone has a point, the set still hits the front one.
+  expect(counts.occluded).toBeGreaterThan(5)
+})

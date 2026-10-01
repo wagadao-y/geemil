@@ -1572,3 +1572,62 @@ test('a cloud set installs the most important decoded nodes of any cloud first',
     far.dispose();
   }
 });
+
+test('a cloud set caches the encoded nodes of its caching clouds in one budget', async () => {
+  const load = async (name, options) => loadPotreeV2(`https://example.test/${name}/metadata.json`, {
+    fetch: flakyCloudFetcher(childFiles, {}).fetcher, minNodePixelSize: 1, ...options,
+  });
+  const a = await load('a', { encodedCacheByteBudget: 1024 });
+  const b = await load('b', {}); // DEFAULT caches nothing unless asked.
+  const c = await load('c', { encodedCacheByteBudget: 1024 });
+  const set = new PotreeV2PointCloudSet({ encodedCacheByteBudget: 36 });
+  try {
+    assert.equal(set.encodedCacheByteBudget, 36);
+    assert.equal(a.ownEncodedCache.size, 1); // The root, cached while loading.
+    for (const cloud of [a, b, c]) set.add(cloud);
+    // Joining drops what a cloud cached on its own.
+    assert.equal(a.ownEncodedCache.size, 0);
+    const camera = childViewCamera();
+    await waitFor(() => {
+      set.update(camera, 600);
+      return [a, b, c].every(cloud => cloud.group.children.length === 2);
+    });
+    // One child of a and of c, 18 bytes each; b keeps none.
+    assert.equal(set.encodedCache.size, 2);
+    assert.equal(set.encodedCache.bytes, 36);
+    assert.equal(a.ownEncodedCache.size, 0);
+    // Leaving the set drops a cloud's nodes from it.
+    set.remove(c);
+    assert.equal(set.encodedCache.size, 1);
+    // A budget of 0 stops a member from caching, and drops what it cached.
+    a.encodedCacheByteBudget = 0;
+    assert.equal(set.encodedCache.size, 0);
+  } finally {
+    for (const cloud of [a, b, c]) cloud.dispose();
+  }
+});
+
+test('bounding boxes of every cloud share one geometry and material until the last is disposed', async () => {
+  const [a, b] = await loadChildClouds(2);
+  try {
+    const camera = childViewCamera();
+    for (const cloud of [a, b]) {
+      cloud.showBoundingBoxes = true;
+      cloud.update(camera, 600);
+    }
+    const box = cloud => cloud.group.children.find(child => child.isLineSegments);
+    assert.ok(box(a) && box(b));
+    assert.equal(box(a).geometry, box(b).geometry);
+    assert.equal(box(a).material, box(b).material);
+    const disposed = [];
+    box(b).geometry.addEventListener('dispose', () => disposed.push('geometry'));
+    box(b).material.addEventListener('dispose', () => disposed.push('material'));
+    a.dispose();
+    assert.deepEqual(disposed, []);
+    b.dispose();
+    assert.deepEqual(disposed, ['geometry', 'material']);
+  } finally {
+    a.dispose();
+    b.dispose();
+  }
+});

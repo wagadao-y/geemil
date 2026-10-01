@@ -60,7 +60,7 @@ HTTP 429（Too Many Requests）と 503（Service Unavailable）は、ノード�
 
 HTTP のエラーは `HttpError`（`status` と `retryAfterMs` を持ちます）として `onError` に渡されるので、404 などの内容に応じて処理を分けられます。
 
-キャッシュは二段階です。復号済みジオメトリは、表示中の `pointBudget` の2倍の点数まで保持し、超過時に非表示ノードを古い順に破棄します。この上限は `pointBudget` の変更に追従し、`cachePointBudget` で固定値に上書きできます。BROTLI の URL データは、復号前のノードも LRU で最大 128 MiB 保持します。上限は `encodedCacheByteBudget`（バイト数）で変更でき、`0` で無効になります。無圧縮（`DEFAULT`）のデータとローカルファイルは初期状態では復号前のキャッシュを使いません。復号前のキャッシュに残っているノードは再取得せず、Worker で再デコードします。
+キャッシュは二段階です。復号済みジオメトリは、表示中の `pointBudget` の2倍の点数まで保持し、超過時に非表示ノードを古い順に破棄します。この上限は `pointBudget` の変更に追従し、`cachePointBudget` で固定値に上書きできます。BROTLI の URL データは、復号前のノードも LRU で最大 128 MiB 保持します。上限は `encodedCacheByteBudget`（バイト数）で変更でき、`0` で無効になります。無圧縮（`DEFAULT`）のデータとローカルファイルは初期状態では復号前のキャッシュを使いません。`PotreeV2PointCloudSet` に入れた点群は、自分の `encodedCacheByteBudget` が 0 より大きければセットの復号前キャッシュを使います（下記）。復号前のキャッシュに残っているノードは再取得せず、Worker で再デコードします。
 
 `cloud.fetchStats` と `cloud.loadDiagnostics` は、playground の統計表示のような計測・デバッグ用の API です。項目はリリースごとに変わることがあり、互換性は保証しません。
 
@@ -72,7 +72,7 @@ BROTLI は google/brotli 1.2.0 の decode-only WASM で復号します。Worker 
 
 `showBoundingBoxes: true` を指定すると表示中のノードの bbox を描画します。`cloud.showBoundingBoxes` の変更も次の `update()` から反映されます（初期値は `false`）。
 
-複数の点群を表示するときは `PotreeV2PointCloudSet` で点数予算・復号済みキャッシュ・同時リクエスト数・1 フレームの追加ノード数を共有できます。全点群をまとめて投影サイズの大きいノードから選び、取得と描画への追加もその順に行うので、これらの上限は点群の数に関係なく一定です。キャッシュも全点群で最近表示していないノードから解放します（本家 Potree の `Potree.pointBudget` と同じ考え方です）。オプションは `pointBudget`、`cachePointBudget`、`maxConcurrentLoads`、`maxNodesToGPUPerFrame` で、初期値は点群単体と同じです。セットに入れた点群の同名の設定は使われず、`cloud.update()` を呼ぶとエラーになります。`minNodePixelSize` や `showBoundingBoxes` は点群ごとの設定がそのまま効きます。
+複数の点群を表示するときは `PotreeV2PointCloudSet` で点数予算・復号済みキャッシュ・復号前キャッシュ・同時リクエスト数・1 フレームの追加ノード数を共有できます。全点群をまとめて投影サイズの大きいノードから選び、取得と描画への追加もその順に行うので、これらの上限は点群の数に関係なく一定です。描画への追加を待つ復号済みノードの数も、セット全体で上限を守ります。キャッシュも全点群で最近表示していないノードから解放します（本家 Potree の `Potree.pointBudget` と同じ考え方です）。オプションは `pointBudget`、`cachePointBudget`、`maxConcurrentLoads`、`maxNodesToGPUPerFrame`、`encodedCacheByteBudget` で、初期値は点群単体と同じです（`encodedCacheByteBudget` は 128 MiB）。セットに入れた点群の同名の設定は使われず、`cloud.update()` を呼ぶとエラーになります。ただし点群の `encodedCacheByteBudget` が 0 の点群（`DEFAULT` とローカルファイルの初期状態）は、セットの復号前キャッシュも使いません。点群をセットに入れると、それまで点群単体で持っていた復号前キャッシュは破棄され、セットから外すとセットのキャッシュにあるその点群のノードが破棄されます。`minNodePixelSize` や `showBoundingBoxes` は点群ごとの設定がそのまま効きます。
 
 ```ts
 const clouds = new PotreeV2PointCloudSet({ pointBudget: 3_000_000 });
@@ -86,7 +86,9 @@ if (clouds.update(camera, canvas.clientHeight)) renderer.render(scene, camera);
 
 `clouds.remove(cloud)` で外すと、その点群は再び自分の予算で `cloud.update()` できます。`cloud.dispose()` するとセットからも外れます。
 
-`cloud.pick(renderer, camera, x, y)` は、キャンバス左上からの CSS ピクセル座標 `x`, `y` に描画されている点を返します（なければ `null`）。対象は直前の `update()` で表示したノードです。`cloud.group` かその祖先が非表示なら `null` を返します。カーソル周辺だけをノード番号と点番号（`gl_VertexID`）の整数レンダーターゲットに描画し、GPU の完了を待たずに非同期で読み取るので、ピック用の頂点属性は持ちません。点のサイズと形は表示と同じなので、画面上で点が描かれているピクセルだけが当たります。`radius`（CSS px、初期値 0）を指定すると、その距離内で最も近い点を返します。属性値は CPU 側に保持している復号済みの配列から読みます。
+`clouds.pick(renderer, camera, x, y)` は、セットの全点群を同じ深度バッファに描いてピックするので、手前にある別の点群の点に隠れた点には当たりません。結果の `cloud` で、どの点群の点かが分かります。`cloud.pick()` はその点群だけを描くので、ほかの点群に隠れている点にも当たります。
+
+`cloud.pick(renderer, camera, x, y)` は、キャンバス左上からの CSS ピクセル座標 `x`, `y` に描画されている点を返します（なければ `null`）。ほかの点群による隠れは考慮しないので、複数の点群を重ねて表示する場合は `PotreeV2PointCloudSet` の `pick()` を使ってください。対象は直前の `update()` で表示したノードです。`cloud.group` かその祖先が非表示なら `null` を返します。カーソル周辺だけをノード番号と点番号（`gl_VertexID`）の整数レンダーターゲットに描画し、GPU の完了を待たずに非同期で読み取るので、ピック用の頂点属性は持ちません。点のサイズと形は表示と同じなので、画面上で点が描かれているピクセルだけが当たります。`radius`（CSS px、初期値 0）を指定すると、その距離内で最も近い点を返します。属性値は CPU 側に保持している復号済みの配列から読みます。
 
 ```ts
 canvas.addEventListener('pointermove', async event => {
@@ -95,7 +97,7 @@ canvas.addEventListener('pointermove', async event => {
 });
 ```
 
-結果の `position` は `cloud.group` の変換を含むワールド座標、`sourcePosition` は metadata.json の座標系、`attributes` は復号した `position` 以外の属性（`rgb` は 0〜255）です。`attributes` の値は GPU に送った attribute から読むので、8・16 bit の整数属性以外は元の値と一致しないことがあります。32 bit の整数と 64 bit の浮動小数点数は float32 に丸めた値です。64 bit の単一値属性（`gps-time` など）は metadata の min/max で 0〜1 に正規化した値で、元の値の精度は残っていません。カメラに `setViewOffset` を設定している場合には対応していません。
+結果の `cloud` は点のある点群、`position` は `cloud.group` の変換を含むワールド座標、`sourcePosition` は metadata.json の座標系、`attributes` は復号した `position` 以外の属性（`rgb` は 0〜255）です。`attributes` の値は GPU に送った attribute から読むので、8・16 bit の整数属性以外は元の値と一致しないことがあります。32 bit の整数と 64 bit の浮動小数点数は float32 に丸めた値です。64 bit の単一値属性（`gps-time` など）は metadata の min/max で 0〜1 に正規化した値で、元の値の精度は残っていません。カメラに `setViewOffset` を設定している場合には対応していません。
 
 認証付きの取得には `fetch` を差し替えます。この関数は metadata、hierarchy、octree のすべての取得に使われます。Range ヘッダーと `signal` を維持し、hierarchy と octree には要求した範囲を HTTP 206 で返してください。
 

@@ -1,7 +1,7 @@
 // Renders one point cloud at a fixed view for the Playwright tests; they call `window.harness`.
 import {
-  loadPotreeV2, PotreeV2Clipping, PotreeV2Gradients, type PotreeV2Options, type PotreeV2PointCloud,
-  type PotreeV2PointColorType,
+  loadPotreeV2, PotreeV2Clipping, PotreeV2Gradients, PotreeV2PointCloudSet, type PotreeV2Options,
+  type PotreeV2PointCloud, type PotreeV2PointColorType,
 } from '@geemil/potree-v2-three'
 import { PerspectiveCamera, Plane, Scene, Vector3, WebGLRenderer } from 'three'
 
@@ -185,6 +185,66 @@ const harness = {
       return { differing, drawn, nodes: clouds.map(current => current.loadDiagnostics.requiredNodes), sharedProgram: first !== undefined && first === second }
     } finally {
       for (const current of clouds) {
+        scene.remove(current.group)
+        current.dispose()
+      }
+    }
+  },
+
+  /**
+   * Draw two clouds of `url` in a set, a red one partly in front of a blue one, and pick a grid
+   * of pixels through the set. Counts the picks whose cloud differs from the color drawn at
+   * that pixel, and the front hits where the back cloud picked alone also has a point.
+   */
+  async pickAcrossClouds(url: string) {
+    if (cloud) {
+      scene.remove(cloud.group)
+      cloud.dispose()
+      cloud = undefined
+    }
+    const options = { pointBudget: 10_000_000, minNodePixelSize: 10, pointColorType: 'solid' } as const
+    const [back, front] = await Promise.all([0, 1].map(() => loadPotreeV2(url, options)))
+    const set = new PotreeV2PointCloudSet({ pointBudget: 10_000_000 })
+    try {
+      back!.material.color.set('#0000ff')
+      front!.material.color.set('#ff0000')
+      const size = back!.boundingBox.getSize(new Vector3())
+      // Toward the camera and aside, so that it covers part of the back cloud.
+      front!.group.position.set(size.x * 0.3, -size.y * 0.5, 0)
+      for (const current of [back!, front!]) {
+        set.add(current)
+        scene.add(current.group)
+      }
+      const center = back!.boundingBox.getCenter(new Vector3())
+      const extent = size.length()
+      camera.up.set(0, 0, 1)
+      camera.position.copy(center).add(new Vector3(0, -extent * 0.8, extent * 0.3))
+      camera.lookAt(center)
+      const deadline = performance.now() + 60_000
+      while ([back!, front!].some(current => current.loadDiagnostics.state !== 'complete')) {
+        if (performance.now() > deadline) throw new Error('The view did not finish loading')
+        set.update(camera, SIZE)
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      const pixels = render()
+      const counts = { front: 0, back: 0, mismatched: 0, occluded: 0 }
+      for (let y = 5; y < SIZE; y += 10) {
+        for (let x = 5; x < SIZE; x += 10) {
+          const hit = await set.pick(renderer, camera, x + 0.5, y + 0.5)
+          const at = ((SIZE - 1 - y) * SIZE + x) * 4
+          const drawn = pixels[at] ? 'front' : pixels[at + 2] ? 'back' : null
+          const picked = hit ? (hit.cloud === front ? 'front' : 'back') : null
+          if (picked !== drawn) counts.mismatched++
+          if (picked === 'back') counts.back++
+          if (picked === 'front') {
+            counts.front++
+            if (await back!.pick(renderer, camera, x + 0.5, y + 0.5)) counts.occluded++
+          }
+        }
+      }
+      return counts
+    } finally {
+      for (const current of [back!, front!]) {
         scene.remove(current.group)
         current.dispose()
       }

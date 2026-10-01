@@ -20,7 +20,20 @@ export interface PickTarget {
   clip: NodeClip;
 }
 
-export interface PickHit {
+/**
+ * One cloud's displayed nodes. Each layer is drawn with pick shaders that match its display
+ * material, into one depth-tested target, so the nearest point of any layer hits.
+ */
+export interface PickLayer<Owner> {
+  owner: Owner;
+  display: PotreeV2PointMaterial;
+  /** World matrix of the cloud's group. */
+  groupMatrix: Matrix4;
+  targets: PickTarget[];
+}
+
+export interface PickHit<Owner> {
+  layer: PickLayer<Owner>;
   target: PickTarget;
   /** Point index in the node geometry, i.e. gl_VertexID. */
   index: number;
@@ -69,14 +82,11 @@ async function waitForSync(gl: WebGL2RenderingContext, sync: WebGLSync): Promise
   }
 }
 
-/**
- * Renders node and point IDs around a pixel into an integer target and reads
- * them back through a pixel pack buffer, so the caller never stalls on the GPU.
- */
-export class PointPicker {
-  private readonly clip = new ClipUniforms();
-  private readonly pointSize = new PointSizeUniforms();
-  private readonly material = new ShaderMaterial({
+/** The ID material of one display material, compiled with the same tests and sizes. */
+class PickShader {
+  readonly clip = new ClipUniforms();
+  readonly pointSize = new PointSizeUniforms();
+  readonly material = new ShaderMaterial({
     glslVersion: GLSL3,
     vertexShader, fragmentShader,
     uniforms: {
@@ -90,43 +100,13 @@ export class PointPicker {
   private shape: PotreeV2PointShape = 'square';
   private sizeType: PotreeV2PointSizeType = 'fixed';
   private classified = false;
-  /** The display material of the current pick, for the per-node visible-node indices. */
-  private display?: PotreeV2PointMaterial;
-  // RGBA_INTEGER/UNSIGNED_INT is the read format WebGL2 guarantees for unsigned
-  // integer attachments, so the readback does not depend on implementation formats.
-  private readonly renderTarget = new WebGLRenderTarget(1, 1, {
-    format: RGBAIntegerFormat, type: UnsignedIntType, internalFormat: 'RGBA32UI',
-    minFilter: NearestFilter, magFilter: NearestFilter, generateMipmaps: false, depthBuffer: true,
-  });
-  private readonly scene = new Scene();
-  /** Reused stand-ins that draw node geometries with the ID material; proxy i writes ID i + 1. */
-  private readonly proxies: Points<BufferGeometry, ShaderMaterial>[] = [];
-  /** Held by proxies between picks, so that they keep no node geometry alive after its eviction. */
-  private readonly emptyGeometry = new BufferGeometry();
-  /** The target each proxy draws in the current pick. */
-  private readonly proxyTargets: PickTarget[] = [];
-  private readonly frustum = new Frustum();
-  private readonly projection = new Matrix4();
-  private readonly drawingBuffer = new Vector2();
-  private readonly clearColor = new Color();
-
-  constructor() {
-    // Proxy world matrices are set directly from the node objects.
-    this.scene.matrixWorldAutoUpdate = false;
-  }
 
   /**
-   * `x`, `y` are CSS pixels from the canvas' top-left corner, and `radius` is CSS pixels too.
-   * With radius 0 only a point drawn under that pixel hits. Clips, point size and shape
-   * follow `display`, so both materials compile the same tests and cover the same pixels.
+   * Follow `display`'s clips, point size and shape, so both materials cover the same pixels.
+   * `height` is the pick target's, which covers the view offset region.
    */
-  async pick(
-    renderer: WebGLRenderer, camera: Camera, targets: PickTarget[], groupMatrix: Matrix4,
-    x: number, y: number, radius: number, display: PotreeV2PointMaterial,
-  ): Promise<PickHit | null> {
-    if (targets.length === 0 || !isPickCamera(camera)) return null;
+  sync(display: PotreeV2PointMaterial, pixelRatio: number, height: number): void {
     const { shape, sizeType } = display;
-    const sizeSettings = display.sizeSettings;
     if (this.clip.resize(display.clipCapacity)) {
       this.material.defines = { ...this.material.defines, ...this.clip.defines };
       this.material.needsUpdate = true;
@@ -149,6 +129,79 @@ export class PointPicker {
       this.material.needsUpdate = true;
     }
     this.material.uniforms.classificationStyles!.value = display.classification.texture;
+    this.pointSize.write(display.sizeSettings, pixelRatio, height, display.spacing, display.visibleNodes.texture);
+  }
+
+  dispose(): void { this.material.dispose(); }
+}
+
+/** What one proxy draws in the current pick. */
+type Drawn<Owner> = { layer: PickLayer<Owner>; target: PickTarget; shader: PickShader };
+
+let shared: PointPicker | undefined;
+
+/**
+ * Renders node and point IDs around a pixel into an integer target and reads
+ * them back through a pixel pack buffer, so the caller never stalls on the GPU.
+ * One picker is shared by every cloud.
+ */
+export class PointPicker {
+  private references = 0;
+  /** Pick shaders by display material; a cloud's is dropped by forget() when it is disposed. */
+  private readonly shaders = new Map<PotreeV2PointMaterial, PickShader>();
+  // RGBA_INTEGER/UNSIGNED_INT is the read format WebGL2 guarantees for unsigned
+  // integer attachments, so the readback does not depend on implementation formats.
+  private readonly renderTarget = new WebGLRenderTarget(1, 1, {
+    format: RGBAIntegerFormat, type: UnsignedIntType, internalFormat: 'RGBA32UI',
+    minFilter: NearestFilter, magFilter: NearestFilter, generateMipmaps: false, depthBuffer: true,
+  });
+  private readonly scene = new Scene();
+  /** Reused stand-ins that draw node geometries with the ID materials; proxy i writes ID i + 1. */
+  private readonly proxies: Points<BufferGeometry, ShaderMaterial>[] = [];
+  /** Held by proxies between picks, so that they keep no node geometry alive after its eviction. */
+  private readonly emptyGeometry = new BufferGeometry();
+  /** What each proxy draws in the current pick. */
+  private readonly drawing: Drawn<unknown>[] = [];
+  private readonly frustum = new Frustum();
+  private readonly projection = new Matrix4();
+  private readonly drawingBuffer = new Vector2();
+  private readonly clearColor = new Color();
+
+  /** The picker shared by every cloud, created on first use and disposed with the last release(). */
+  static acquire(): PointPicker {
+    shared ??= new PointPicker();
+    shared.references++;
+    return shared;
+  }
+
+  private constructor() {
+    // Proxy world matrices are set directly from the node objects.
+    this.scene.matrixWorldAutoUpdate = false;
+  }
+
+  /** Give back the picker from acquire(); the last release disposes it. */
+  release(): void {
+    if (--this.references > 0) return;
+    if (shared === this) shared = undefined;
+    this.dispose();
+  }
+
+  /** Dispose the pick shader of a display material that is no longer used. */
+  forget(display: PotreeV2PointMaterial): void {
+    this.shaders.get(display)?.dispose();
+    this.shaders.delete(display);
+  }
+
+  /**
+   * `x`, `y` are CSS pixels from the canvas' top-left corner, and `radius` is CSS pixels too.
+   * With radius 0 only a point drawn under that pixel hits. The layers are drawn together
+   * with depth testing, so a point hidden behind another cloud's points is not hit.
+   */
+  async pick<Owner>(
+    renderer: WebGLRenderer, camera: Camera, layers: readonly PickLayer<Owner>[],
+    x: number, y: number, radius: number,
+  ): Promise<PickHit<Owner> | null> {
+    if (!layers.some(layer => layer.targets.length > 0) || !isPickCamera(camera)) return null;
     const gl = renderer.getContext();
     if (!(gl instanceof WebGL2RenderingContext) || gl.isContextLost()) return null;
     const pixelRatio = renderer.getPixelRatio();
@@ -156,8 +209,11 @@ export class PointPicker {
     const cx = x * pixelRatio;
     const cy = y * pixelRatio;
     const r = Math.max(0, radius) * pixelRatio;
-    // Largest point drawn, in device pixels.
-    const size = (sizeType === 'fixed' ? sizeSettings.size : sizeSettings.maxSize) * pixelRatio;
+    // Largest point drawn by any layer, in device pixels.
+    const size = Math.max(...layers.map(({ display }) => {
+      const settings = display.sizeSettings;
+      return (settings.type === 'fixed' ? settings.size : settings.maxSize) * pixelRatio;
+    }));
 
     // Pixels searched for hits, in device pixels from the top-left corner.
     const innerX0 = Math.max(0, Math.floor(cx - r));
@@ -181,25 +237,31 @@ export class PointPicker {
     pickCamera.matrixWorldAutoUpdate = false;
     pickCamera.setViewOffset(bufferWidth, bufferHeight, x0, y0, width, height);
     pickCamera.updateProjectionMatrix();
-    this.projection.multiplyMatrices(pickCamera.projectionMatrix, pickCamera.matrixWorldInverse).multiply(groupMatrix);
-    this.frustum.setFromProjectionMatrix(this.projection);
 
     // Snapshot the drawn targets: the proxies may be reused by another pick while this one waits.
-    const drawn: PickTarget[] = [];
+    const drawn: Drawn<Owner>[] = [];
     this.scene.clear();
-    for (const target of targets) {
-      if (!this.frustum.intersectsBox(target.node.box)) continue;
-      const proxy = this.proxy(drawn.length);
-      proxy.geometry = target.points.geometry;
-      proxy.matrixWorld.multiplyMatrices(groupMatrix, target.points.matrix);
-      this.proxyTargets[drawn.length] = target;
-      this.scene.add(proxy);
-      drawn.push(target);
+    for (const layer of layers) {
+      this.projection.multiplyMatrices(pickCamera.projectionMatrix, pickCamera.matrixWorldInverse).multiply(layer.groupMatrix);
+      this.frustum.setFromProjectionMatrix(this.projection);
+      let shader: PickShader | undefined;
+      for (const target of layer.targets) {
+        if (!this.frustum.intersectsBox(target.node.box)) continue;
+        if (!shader) {
+          shader = this.shader(layer.display);
+          shader.sync(layer.display, pixelRatio, height);
+        }
+        const proxy = this.proxy(drawn.length);
+        proxy.geometry = target.points.geometry;
+        proxy.material = shader.material;
+        proxy.matrixWorld.multiplyMatrices(layer.groupMatrix, target.points.matrix);
+        const item = { layer, target, shader };
+        this.drawing[drawn.length] = item;
+        this.scene.add(proxy);
+        drawn.push(item);
+      }
     }
     if (drawn.length === 0) return null;
-    // The pick target covers the view offset region, so its height is the viewport's.
-    this.pointSize.write(sizeSettings, pixelRatio, height, display.spacing, display.visibleNodes.texture);
-    this.display = display;
 
     const pixels = new Uint32Array(width * height * 4);
     const previousTarget = renderer.getRenderTarget();
@@ -229,8 +291,7 @@ export class PointPicker {
       renderer.setRenderTarget(previousTarget);
       this.scene.clear();
       for (let i = 0; i < drawn.length; i++) this.proxies[i]!.geometry = this.emptyGeometry;
-      this.proxyTargets.length = 0;
-      this.display = undefined;
+      this.drawing.length = 0;
     }
 
     try {
@@ -243,7 +304,7 @@ export class PointPicker {
       gl.deleteBuffer(packBuffer);
     }
 
-    let best: PickHit | null = null;
+    let best: PickHit<Owner> | null = null;
     // The pixel under (cx, cy) has its centre at most √½ px away, so it always qualifies.
     const maxDistance = r + Math.SQRT1_2;
     for (let py = innerY0; py < innerY1; py++) {
@@ -255,40 +316,50 @@ export class PointPicker {
         if (id === 0) continue;
         const distance = Math.hypot(px + 0.5 - cx, py + 0.5 - cy);
         if (distance > maxDistance || (best && distance >= best.distance)) continue;
-        const target = drawn[id - 1];
+        const item = drawn[id - 1];
         const index = pixels[at + 1]!;
-        if (!target || index >= target.points.geometry.getAttribute('position').count) continue;
-        best = { target, index, distance };
+        if (!item || index >= item.target.points.geometry.getAttribute('position').count) continue;
+        best = { layer: item.layer, target: item.target, index, distance };
       }
     }
     return best;
   }
 
+  private shader(display: PotreeV2PointMaterial): PickShader {
+    let shader = this.shaders.get(display);
+    if (!shader) {
+      shader = new PickShader();
+      this.shaders.set(display, shader);
+    }
+    return shader;
+  }
+
   private proxy(index: number): Points<BufferGeometry, ShaderMaterial> {
     let proxy = this.proxies[index];
     if (!proxy) {
-      proxy = new Points(this.emptyGeometry, this.material);
+      proxy = new Points(this.emptyGeometry);
       proxy.matrixAutoUpdate = false;
       proxy.frustumCulled = false;
       const id = index + 1;
-      // All proxies share one material, so the node ID and clip uniforms must be re-uploaded per object.
+      // Proxies of one layer share its material, so the node ID and clip uniforms must be re-uploaded per object.
       proxy.onBeforeRender = () => {
-        const target = this.proxyTargets[index]!;
-        this.clip.write(target.clip, target.node.box.min);
-        this.pointSize.writeNode(target.node, this.display!.visibleNodes.index(target.node));
-        this.material.uniforms.nodeId!.value = id;
-        this.material.uniformsNeedUpdate = true;
+        const { layer, target, shader } = this.drawing[index]!;
+        shader.clip.write(target.clip, target.node.box.min);
+        shader.pointSize.writeNode(target.node, layer.display.visibleNodes.index(target.node));
+        shader.material.uniforms.nodeId!.value = id;
+        shader.material.uniformsNeedUpdate = true;
       };
-      this.proxies[index] = proxy;
+      this.proxies[index] = proxy as Points<BufferGeometry, ShaderMaterial>;
     }
-    return proxy;
+    return proxy as Points<BufferGeometry, ShaderMaterial>;
   }
 
-  dispose(): void {
+  private dispose(): void {
     this.scene.clear();
     this.proxies.length = 0;
     this.emptyGeometry.dispose();
-    this.material.dispose();
+    for (const shader of this.shaders.values()) shader.dispose();
+    this.shaders.clear();
     this.renderTarget.dispose();
   }
 }
