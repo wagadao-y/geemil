@@ -1,9 +1,8 @@
 import {
   BoxGeometry, Camera, EdgesGeometry, Frustum, Group, LineBasicMaterial,
-  LineSegments, Matrix4, Object3D, OrthographicCamera, PerspectiveCamera,
-  Points, Sphere, Vector3,
+  LineSegments, Matrix4, Object3D, Points, Sphere, Vector3,
 } from 'three';
-import type { Box3, WebGLRenderer } from 'three';
+import type { Box3, OrthographicCamera, PerspectiveCamera, WebGLRenderer } from 'three';
 import { DEFAULT_DECODED_ATTRIBUTES, nodeOrigin } from './decode.js';
 import type { DecodedBatchNode, DecodedNodeData } from './decode.js';
 import type { NodeDecodeTiming } from './decode.js';
@@ -1416,8 +1415,9 @@ function projectedRadius(
   // Pixels per world unit (at distance 1 for perspective cameras), read from the matrix
   // the view is rendered with, so `zoom` and view offsets count as they do on screen.
   const pixelsPerUnit = camera.projectionMatrix.elements[5]! * height / 2;
-  if (camera instanceof OrthographicCamera) return sphere.radius * pixelsPerUnit;
-  if (camera instanceof PerspectiveCamera) {
+  // Flags rather than instanceof, which fails when two copies of Three.js are bundled.
+  if ((camera as OrthographicCamera).isOrthographicCamera === true) return sphere.radius * pixelsPerUnit;
+  if ((camera as PerspectiveCamera).isPerspectiveCamera === true) {
     const distance = cameraPosition.distanceTo(sphere.center);
     if (distance < sphere.radius) return Infinity;
     return sphere.radius * pixelsPerUnit / distance;
