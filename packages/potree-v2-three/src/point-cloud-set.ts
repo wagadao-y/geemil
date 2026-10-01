@@ -72,6 +72,7 @@ export class PotreeV2PointCloudSet {
     if (owner === this) return;
     if (owner) throw new Error('This point cloud already belongs to another PotreeV2PointCloudSet');
     cloud.dropEncodedNodes(this.encodedCache);
+    cloud.invalidateSelection();
     cloudSets.set(cloud, this);
     this.members.push(cloud);
     this.membershipChanged = true;
@@ -83,6 +84,8 @@ export class PotreeV2PointCloudSet {
     this.members.splice(index, 1);
     cloudSets.delete(cloud);
     cloud.dropEncodedNodes(this.encodedCache);
+    // Its last selection shared the set's budget; on its own it may select more.
+    cloud.invalidateSelection();
     this.membershipChanged = true;
     return true;
   }

@@ -15,6 +15,8 @@ renderer.debug.onShaderError = (gl, _program, vertexShader, fragmentShader) => {
   shaderErrors.push(`${gl.getShaderInfoLog(vertexShader) ?? ''}${gl.getShaderInfoLog(fragmentShader) ?? ''}`)
 }
 const gl = renderer.getContext()
+/** Created by the first test that needs a logarithmic depth buffer. */
+let logDepthRenderer: WebGLRenderer | undefined
 const scene = new Scene()
 const camera = new PerspectiveCamera(60, 1, 0.01, 1000)
 let cloud: PotreeV2PointCloud | undefined
@@ -195,8 +197,10 @@ const harness = {
    * Draw two clouds of `url` in a set, a red one partly in front of a blue one, and pick a grid
    * of pixels through the set. Counts the picks whose cloud differs from the color drawn at
    * that pixel, and the front hits where the back cloud picked alone also has a point.
+   * With `far`, the view is far away through a logarithmic depth buffer, and the red cloud is
+   * just in front of the blue one, nearer than a standard depth buffer can tell apart there.
    */
-  async pickAcrossClouds(url: string) {
+  async pickAcrossClouds(url: string, far = false) {
     if (cloud) {
       scene.remove(cloud.group)
       cloud.dispose()
@@ -209,28 +213,40 @@ const harness = {
       back!.material.color.set('#0000ff')
       front!.material.color.set('#ff0000')
       const size = back!.boundingBox.getSize(new Vector3())
-      // Toward the camera and aside, so that it covers part of the back cloud.
-      front!.group.position.set(size.x * 0.3, -size.y * 0.5, 0)
-      for (const current of [back!, front!]) {
+      const center = back!.boundingBox.getCenter(new Vector3())
+      const extent = size.length()
+      const direction = new Vector3(0, -0.8, 0.3).normalize()
+      const distance = far ? extent * 1000 : extent * 0.85
+      camera.up.set(0, 0, 1)
+      camera.position.copy(center).addScaledVector(direction, distance)
+      camera.lookAt(center)
+      if (far) {
+        camera.fov = 2 * Math.atan(extent * 0.6 / distance) * 180 / Math.PI
+        camera.near = extent * 0.001
+        camera.far = distance * 2
+      }
+      camera.updateProjectionMatrix()
+      // Far: straight toward the camera, so it covers the back cloud. Otherwise toward it and aside.
+      if (far) front!.group.position.copy(direction).multiplyScalar(extent)
+      else front!.group.position.set(size.x * 0.3, -size.y * 0.5, 0)
+      // Front first: its pick shader is compiled first, so Three.js draws it before the back
+      // cloud, which then wins where their depths are equal.
+      for (const current of [front!, back!]) {
         set.add(current)
         scene.add(current.group)
       }
-      const center = back!.boundingBox.getCenter(new Vector3())
-      const extent = size.length()
-      camera.up.set(0, 0, 1)
-      camera.position.copy(center).add(new Vector3(0, -extent * 0.8, extent * 0.3))
-      camera.lookAt(center)
+      const target = far ? (logDepthRenderer ??= createLogDepthRenderer()) : renderer
       const deadline = performance.now() + 60_000
       while ([back!, front!].some(current => current.loadDiagnostics.state !== 'complete')) {
         if (performance.now() > deadline) throw new Error('The view did not finish loading')
         set.update(camera, SIZE)
         await new Promise(resolve => setTimeout(resolve, 20))
       }
-      const pixels = render()
+      const pixels = render(target)
       const counts = { front: 0, back: 0, mismatched: 0, occluded: 0 }
       for (let y = 5; y < SIZE; y += 10) {
         for (let x = 5; x < SIZE; x += 10) {
-          const hit = await set.pick(renderer, camera, x + 0.5, y + 0.5)
+          const hit = await set.pick(target, camera, x + 0.5, y + 0.5)
           const at = ((SIZE - 1 - y) * SIZE + x) * 4
           const drawn = pixels[at] ? 'front' : pixels[at + 2] ? 'back' : null
           const picked = hit ? (hit.cloud === front ? 'front' : 'back') : null
@@ -238,7 +254,7 @@ const harness = {
           if (picked === 'back') counts.back++
           if (picked === 'front') {
             counts.front++
-            if (await back!.pick(renderer, camera, x + 0.5, y + 0.5)) counts.occluded++
+            if (await back!.pick(target, camera, x + 0.5, y + 0.5)) counts.occluded++
           }
         }
       }
@@ -248,20 +264,34 @@ const harness = {
         scene.remove(current.group)
         current.dispose()
       }
+      camera.fov = 60
+      camera.near = 0.01
+      camera.far = 1000
+      camera.updateProjectionMatrix()
     }
   },
 
   errors() {
-    return { shaderErrors: [...shaderErrors], glError: gl.getError() }
+    const logDepthError = logDepthRenderer?.getContext().getError() ?? 0
+    return { shaderErrors: [...shaderErrors], glError: gl.getError() || logDepthError }
   },
 }
 
 /** Draw the view and read back its RGBA pixels. */
-function render(): Uint8Array<ArrayBuffer> {
-  renderer.render(scene, camera)
+function render(target = renderer): Uint8Array<ArrayBuffer> {
+  target.render(scene, camera)
   const pixels = new Uint8Array(SIZE * SIZE * 4)
-  gl.readPixels(0, 0, SIZE, SIZE, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+  const context = target.getContext()
+  context.readPixels(0, 0, SIZE, SIZE, context.RGBA, context.UNSIGNED_BYTE, pixels)
   return pixels
+}
+
+function createLogDepthRenderer(): WebGLRenderer {
+  const created = new WebGLRenderer({ preserveDrawingBuffer: true, logarithmicDepthBuffer: true })
+  created.setSize(SIZE, SIZE, false)
+  created.debug.onShaderError = renderer.debug.onShaderError
+  document.body.append(created.domElement)
+  return created
 }
 
 function current(): PotreeV2PointCloud {

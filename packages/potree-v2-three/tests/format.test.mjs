@@ -7,6 +7,7 @@ import { decodeNode } from '../dist/node-geometry.js';
 import { fetchRange, HttpError, parseRetryAfter } from '../dist/http.js';
 import { RequestGate } from '../dist/request-gate.js';
 import { EncodedNodeCache } from '../dist/encoded-cache.js';
+import { DecoderPool } from '../dist/decoder-pool.js';
 import { loadPotreeV2, loadPotreeV2FromFiles, PotreeV2PointCloudSet, selectPotreeV2Files } from '../dist/index.js';
 import { Box3, Group, PerspectiveCamera, Vector3 } from 'three';
 
@@ -1629,5 +1630,54 @@ test('bounding boxes of every cloud share one geometry and material until the la
   } finally {
     a.dispose();
     b.dispose();
+  }
+});
+
+test('a cloud removed from a set selects again on its own budget, even when equal to the set\'s', async () => {
+  const [a, b] = await loadChildClouds(2);
+  const set = new PotreeV2PointCloudSet({ pointBudget: 2 });
+  set.add(a);
+  set.add(b);
+  try {
+    // Alone, the root and child of b fit in 2 points; in the set, the two roots take them.
+    b.pointBudget = 2;
+    const camera = childViewCamera();
+    await waitFor(() => !set.update(camera, 600) && b.group.children.length === 1 && b.settled);
+    set.remove(b);
+    await waitFor(() => { b.update(camera, 600); return b.group.children.length === 2; });
+  } finally {
+    a.dispose();
+    b.dispose();
+  }
+});
+
+test('a cloud whose options fail to build its material keeps no decoder Workers', async () => {
+  const { fetcher } = flakyCloudFetcher(childFiles, {});
+  await assert.rejects(
+    loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, gradient: [] }),
+    /at least one stop/,
+  );
+  const pool = DecoderPool.acquire(1);
+  try {
+    assert.equal(pool.references, 1);
+  } finally {
+    pool.release();
+  }
+});
+
+test('update follows a camera whose parent moved since the last render', async () => {
+  const [cloud] = await loadChildClouds(1);
+  try {
+    const rig = new Group();
+    const camera = childViewCamera();
+    rig.add(camera);
+    rig.updateMatrixWorld();
+    await waitFor(() => !cloud.update(camera, 600) && cloud.group.children.length === 2 && cloud.settled);
+    // Moved, but not rendered yet: the matrices of the rig are stale.
+    rig.position.x = 1000;
+    assert.equal(cloud.update(camera, 600), true);
+    assert.deepEqual(cloud.group.children.map(node => node.visible), [false, false]);
+  } finally {
+    cloud.dispose();
   }
 });

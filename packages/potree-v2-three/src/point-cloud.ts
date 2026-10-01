@@ -506,9 +506,6 @@ export class PotreeV2PointCloud {
     this.clipping = options.clipping ?? null;
     this.retryDelayMs = Math.max(0, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS);
     this.gate = RequestGate.for(url);
-    this.decoder = DecoderPool.acquire(this.decoderWorkers);
-    // Workers and the WASM decoder start while the first hierarchy chunk is fetched.
-    this.decoder.warm(metadata.encoding === 'BROTLI');
     this.onError = options.onError;
     this.material = new PotreeV2PointMaterial({
       size: options.pointSize ?? 2, shape: options.pointShape ?? 'square',
@@ -523,6 +520,10 @@ export class PotreeV2PointCloud {
       classification: options.classification,
     });
     this.group.name = metadata.name ?? 'Potree v2 point cloud';
+    // Last, so that options rejected above, such as an empty gradient, leave no Workers behind.
+    this.decoder = DecoderPool.acquire(this.decoderWorkers);
+    // Workers and the WASM decoder start while the first hierarchy chunk is fetched.
+    this.decoder.warm(metadata.encoding === 'BROTLI');
   }
 
   /**
@@ -550,6 +551,15 @@ export class PotreeV2PointCloud {
   private get encodedCache(): EncodedNodeCache | undefined {
     if (this.ownEncodedCache.maxBytes <= 0) return undefined;
     return cloudSets.get(this)?.encodedCache ?? this.ownEncodedCache;
+  }
+
+  /**
+   * Traverse at the next update even if the view and budgets are unchanged, as when the cloud
+   * joins or leaves a set: its last selection shared a budget it no longer shares, or the reverse.
+   * @internal
+   */
+  invalidateSelection(): void {
+    this.settled = false;
   }
 
   /**
@@ -1093,7 +1103,8 @@ export class PotreeV2PointCloud {
     const active = clouds.filter(cloud => !cloud.disposed);
     if (active.length === 0) return false;
     if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return false;
-    camera.updateMatrixWorld();
+    // From the parents down: a camera in a rig moved since the last render has stale matrices.
+    camera.updateWorldMatrix(true, false);
     let unchanged = !force;
     for (const cloud of active) {
       if (!cloud.prepareView(camera, viewportHeight, pointBudget, cachePointBudget)) unchanged = false;

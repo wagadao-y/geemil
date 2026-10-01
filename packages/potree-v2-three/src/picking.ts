@@ -41,7 +41,11 @@ export interface PickHit<Owner> {
   distance: number;
 }
 
+// Log depth as the display shader writes it, so that the nearest point is the one drawn: a
+// standard depth buffer cannot tell apart points far from a camera with a small near plane.
 const vertexShader = /* glsl */`
+#include <common>
+#include <logdepthbuf_pars_vertex>
 ${pointSizeVertexPars}
 ${clipVertexPars}
 ${classificationVertexPars}
@@ -54,14 +58,17 @@ void main() {
   gl_PointSize = pointSize();
   ${clipVertex}
   ${classificationVertex}
+  #include <logdepthbuf_vertex>
 }`;
 
 const fragmentShader = /* glsl */`
+#include <logdepthbuf_pars_fragment>
 uniform highp uint nodeId;
 flat in highp uint vIndex;
 layout(location = 0) out highp uvec4 pickId;
 void main() {
   ${pointShapeFragment}
+  #include <logdepthbuf_fragment>
   pickId = uvec4(nodeId, vIndex, 0u, 0u);
 }`;
 
@@ -231,7 +238,8 @@ export class PointPicker {
     const width = x1 - x0;
     const height = y1 - y0;
 
-    camera.updateMatrixWorld();
+    // From the parents down, as update() does, so that a camera in a moved rig is current.
+    camera.updateWorldMatrix(true, false);
     const pickCamera = new (camera.constructor as new () => PickCamera)().copy(camera as never, false) as PickCamera;
     // Keep the copied world matrices; recomputing them would drop a parent's transform.
     pickCamera.matrixWorldAutoUpdate = false;

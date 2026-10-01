@@ -193,3 +193,10 @@ test('a cloud set picks the nearest drawn point of any cloud', async ({ page }) 
   // Where the back cloud alone has a point, the set still hits the front one.
   expect(counts.occluded).toBeGreaterThan(5)
 })
+
+test('picks follow a logarithmic depth buffer far from the camera', async ({ page }) => {
+  const counts = await page.evaluate(url => window.harness.pickAcrossClouds(url, true), BROTLI)
+  // The front cloud covers the back one; a standard depth buffer would let either win.
+  expect(counts.front).toBeGreaterThan(20)
+  expect(counts.mismatched).toBe(0)
+})
