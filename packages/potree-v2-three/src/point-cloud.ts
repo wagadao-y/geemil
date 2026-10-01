@@ -386,8 +386,6 @@ export class PotreeV2PointCloud {
   /** @internal */
   readonly root: OctreeNode;
   readonly metadata: PotreeV2Metadata;
-  /** metadata.json position of `group`'s local origin, the bounding box minimum. */
-  readonly worldOffset: Vector3;
   readonly material: PotreeV2PointMaterial;
 
   minNodePixelSize: number;
@@ -474,7 +472,6 @@ export class PotreeV2PointCloud {
     this.metadataUrl = url;
     this.metadata = metadata;
     this.root = createRoot(metadata);
-    this.worldOffset = new Vector3(...metadata.boundingBox.min);
     this.fetcher = options.fetch ?? fetch;
     this.cachesEncodedNodes = options.cacheEncodedNodes ?? metadata.encoding === 'BROTLI';
     this.minNodePixelSize = options.minNodePixelSize ?? 30;
@@ -505,6 +502,9 @@ export class PotreeV2PointCloud {
    * metadata.json's bounding box. A new copy on each call.
    */
   get boundingBox(): Box3 { return this.root.box.clone(); }
+
+  /** metadata.json position of `group`'s local origin, the bounding box minimum. A new copy on each call. */
+  get worldOffset(): Vector3 { return new Vector3(...this.metadata.boundingBox.min); }
 
   /**
    * Whether this cloud keeps octree payloads in its set's encoded cache; see the option of the

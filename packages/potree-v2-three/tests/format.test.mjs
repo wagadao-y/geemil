@@ -364,6 +364,9 @@ test('loads metadata, hierarchy and root through HTTP ranges', async () => {
   set.pointBudget = 2_000_000;
   assert.equal(cloud.group.children.length, 1);
   assert.equal(cloud.worldOffset.x, 100);
+  // A copy: changing it moves nothing.
+  cloud.worldOffset.x = 0;
+  assert.equal(cloud.worldOffset.x, 100);
   assert.match(cloud.material.vertexShader, /lessThanEqual\(c, vec3\(0\.04045\)\)/);
   assert.equal(cloud.material.colorType, 'rgb');
   assert.equal(cloud.material.defines.POINT_COLOR_RGB, '');

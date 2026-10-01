@@ -4,35 +4,40 @@ export type PotreeV2AttributeType =
   | 'int8' | 'uint8' | 'int16' | 'uint16' | 'int32' | 'uint32'
   | 'int64' | 'uint64' | 'float' | 'double';
 
+/** One attribute of metadata.json, read-only as the decoders and shaders were built from it. */
 export interface PotreeV2Attribute {
-  name: string;
-  type: PotreeV2AttributeType;
-  size: number;
-  numElements: number;
-  elementSize: number;
-  min?: number[];
-  max?: number[];
-  scale?: number[];
-  offset?: number[];
-  description?: string;
+  readonly name: string;
+  readonly type: PotreeV2AttributeType;
+  readonly size: number;
+  readonly numElements: number;
+  readonly elementSize: number;
+  readonly min?: readonly number[];
+  readonly max?: readonly number[];
+  readonly scale?: readonly number[];
+  readonly offset?: readonly number[];
+  readonly description?: string;
 }
 
+/** metadata.json, read-only at every level: the octree, decoders and shaders were built from it. */
 export interface PotreeV2Metadata {
-  version: string;
-  name?: string;
+  readonly version: string;
+  readonly name?: string;
   /**
    * `DEFAULT` stores the points uncompressed and `BROTLI` compresses them, as PotreeConverter
    * writes and Potree reads them.
    */
-  encoding: 'DEFAULT' | 'BROTLI';
-  projection?: string;
-  points: number;
-  spacing: number;
-  scale: [number, number, number];
-  offset: [number, number, number];
-  boundingBox: { min: [number, number, number]; max: [number, number, number] };
-  hierarchy: { firstChunkSize: number; stepSize?: number; depth?: number };
-  attributes: PotreeV2Attribute[];
+  readonly encoding: 'DEFAULT' | 'BROTLI';
+  readonly projection?: string;
+  readonly points: number;
+  readonly spacing: number;
+  readonly scale: readonly [number, number, number];
+  readonly offset: readonly [number, number, number];
+  readonly boundingBox: {
+    readonly min: readonly [number, number, number];
+    readonly max: readonly [number, number, number];
+  };
+  readonly hierarchy: { readonly firstChunkSize: number; readonly stepSize?: number; readonly depth?: number };
+  readonly attributes: readonly PotreeV2Attribute[];
 }
 
 export interface OctreeNode {
@@ -137,7 +142,7 @@ const typeSizes: Record<PotreeV2AttributeType, number> = {
   int64: 8, uint64: 8, float: 4, double: 8,
 };
 
-function isFiniteVector(value: readonly unknown[]): value is [number, number, number] {
+function isFiniteVector(value: readonly unknown[]): value is readonly [number, number, number] {
   return value.length === 3 && value.every(Number.isFinite);
 }
 
@@ -148,11 +153,12 @@ export function validateMetadata(value: unknown): PotreeV2Metadata {
   if (m.encoding !== 'BROTLI' && m.encoding !== 'DEFAULT') {
     throw new Error(`Unsupported Potree v2 encoding: ${String(m.encoding)} (supported: DEFAULT, BROTLI)`);
   }
-  if (!Array.isArray(m.attributes) || !m.attributes.some(a => a.name === 'position')) {
+  // Array.isArray() narrows a readonly array to any[]; the checks go through unknown to keep the types.
+  if (!Array.isArray(m.attributes as unknown) || !m.attributes.some(a => a.name === 'position')) {
     throw new Error('Potree v2 metadata has no position attribute');
   }
-  if (!Array.isArray(m.scale) || !Array.isArray(m.offset) ||
-      !Array.isArray(m.boundingBox?.min) || !Array.isArray(m.boundingBox?.max) ||
+  if (!Array.isArray(m.scale as unknown) || !Array.isArray(m.offset as unknown) ||
+      !Array.isArray(m.boundingBox?.min as unknown) || !Array.isArray(m.boundingBox?.max as unknown) ||
       typeof m.hierarchy !== 'object' || m.hierarchy === null) {
     throw new Error('Incomplete Potree v2 metadata');
   }

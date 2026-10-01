@@ -1,6 +1,6 @@
 # @geemil/potree-v2-three
 
-PotreeConverter **2.0** の `metadata.json`, `hierarchy.bin`, `octree.bin` を Three.js で表示するライブラリです。Potree v1 と Potree-Next v3 は対象外です。
+PotreeConverter **2.0** の `metadata.json`, `hierarchy.bin`, `octree.bin` を Three.js で表示するライブラリです。Potree v1 と Potree-Next v3 は対象外です。Three.js は r180〜r189（`three` 0.180〜0.189）に対応します。
 
 `metadata.json` の `encoding` は、無圧縮の `DEFAULT` と Brotli 圧縮の `BROTLI` に対応しています。それ以外の値は読み込み時にエラーになります。属性は PotreeConverter の出力どおり、`position` が int32 × 3、`rgb` が uint16 × 3 であることを前提とし、ほかの型も読み込み時にエラーになります。
 
@@ -31,7 +31,7 @@ cloud.dispose();
 
 点群の表示は、点群が 1 つでも `PotreeV2PointCloudSet` を通して行います。点数予算・キャッシュの上限・同時リクエスト数・1 フレームに描画へ追加するノード数はセットだけが持ち、セットに入れた全点群で共有します（本家 Potree の `Potree.pointBudget` と同じ考え方です）。点群が持つのは、`minNodePixelSize`、`showBoundingBoxes`、`clipping`、`material` など、その点群だけに効く設定です。セットに入っていない点群は、ノードを選ぶことも読み込むこともありません。
 
-`cloud.group` は座標を点群の bounding box の最小値で平行移動したローカル座標で表示します。元の座標は `cloud.worldOffset` にあります。`cloud.boundingBox` は、このローカル座標での点群の範囲（原点から metadata の bounding box の大きさまで）を返します。大きな地理座標をそのまま `group.position` に設定すると GPU の精度が落ちるため、アプリ側で扱いを決めてください。
+`cloud.group` は座標を点群の bounding box の最小値で平行移動したローカル座標で表示します。元の座標は `cloud.worldOffset` にあります（呼ぶたびに新しいコピーを返します）。`cloud.boundingBox` は、このローカル座標での点群の範囲（原点から metadata の bounding box の大きさまで）を返します。大きな地理座標をそのまま `group.position` に設定すると GPU の精度が落ちるため、アプリ側で扱いを決めてください。
 
 `clouds.update()` はカメラと表示領域の高さから、セットの各点群で必要な階層を選び、近接するノードをまとめて HTTP Range で非同期に読み込みます。戻り値は、どれかの点群でノードの追加・表示切り替え・破棄によりシーンが変わったときと、`cloud.group.layers` を変更したときに `true` になります。カメラ・点群の行列、表示領域の高さ、セットの `pointBudget`、`cachePointBudget`、点群の `minNodePixelSize`、`showBoundingBoxes` が前回と同じで、選ばれたノードがすべてシーンに追加され、読み込み中の処理がない間は、階層の走査を省略して `false` を返します。静止中は、戻り値とカメラ操作を見て描画を省略できます。マテリアルの変更は戻り値に反映されないため、色・サイズ・形・分類の色や表示状態などを変更した場合は、アプリ側で `needsRender = true` にして再描画を要求してください。EDL の設定など、描画に関わるそのほかの設定を変更した場合も同様です。
 
