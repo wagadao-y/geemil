@@ -3,7 +3,7 @@ import {
   LineSegments, Matrix4, Object3D, Points, Sphere, Vector3,
 } from 'three';
 import type { Box3, OrthographicCamera, PerspectiveCamera, WebGLRenderer } from 'three';
-import { DEFAULT_DECODED_ATTRIBUTES, nodeOrigin } from './decode.js';
+import { attributeNormalization, DEFAULT_DECODED_ATTRIBUTES, nodeOrigin } from './decode.js';
 import type { DecodedBatchNode, DecodedNodeData } from './decode.js';
 import type { NodeDecodeTiming } from './decode.js';
 import { DecoderPool } from './decoder-pool.js';
@@ -137,7 +137,11 @@ export interface PotreeV2PickResult {
   position: Vector3;
   /** Position in the metadata.json coordinate system. */
   sourcePosition: [number, number, number];
-  /** Other decoded attributes by metadata.json name. `rgb` holds 0–255 values. */
+  /**
+   * Other decoded attributes by metadata.json name, read from the geometry. `rgb` holds 0–255
+   * values. 64-bit scalars, normalized for the GPU, are mapped back to metadata.json's range,
+   * so they approximate the source values to about 1e-7 of that range.
+   */
   attributes: Record<string, number[]>;
   /** Distance from the requested position to the hit pixel, in CSS pixels. */
   distance: number;
@@ -1449,8 +1453,15 @@ export class PotreeV2PointCloud {
       const { array, itemSize } = attribute;
       // color carries an opaque alpha byte that is not part of the source rgb attribute.
       const values = Array.from(array.slice(index * itemSize, (index + 1) * itemSize));
-      if (name === 'color') attributes.rgb = values.slice(0, 3);
-      else attributes[name] = values;
+      if (name === 'color') {
+        attributes.rgb = values.slice(0, 3);
+        continue;
+      }
+      const source = this.metadata.attributes.find(attribute => attribute.name === name);
+      const normalization = source && attributeNormalization(source);
+      attributes[name] = normalization
+        ? values.map(value => normalization.offset + value * normalization.span)
+        : values;
     }
     return {
       cloud: this,

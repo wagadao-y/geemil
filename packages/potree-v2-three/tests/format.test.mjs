@@ -1238,6 +1238,32 @@ test('Brotli results stay valid after the decoder reuses its memory', async () =
   assert.deepEqual([...a.getAttribute('position').array], [0, 0, 0, 0.5, 0.5, 0.5, 1, 1, 1]);
 });
 
+test('picked attributes map normalized 64-bit values back to the metadata range', async () => {
+  const { metadata, bytes } = genericNode('DEFAULT', 3);
+  const files = {
+    'metadata.json': JSON.stringify({ ...metadata, hierarchy: { firstChunkSize: 22 } }),
+    'hierarchy.bin': record(0, 0, 3, 0, bytes.byteLength),
+    'octree.bin': new Uint8Array(bytes),
+  };
+  const { fetcher } = flakyCloudFetcher(files, {});
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', { fetch: fetcher, attributes: genericNames });
+  try {
+    const points = cloud.group.children[0];
+    const { attributes } = cloud.pickResult({ target: { node: cloud.root, points }, index: 2, distance: 0 }, 1);
+    // Within float32 precision of the 100-wide range.
+    assert.ok(Math.abs(attributes.time[0] - 1004) < 1e-4, String(attributes.time));
+    assert.ok(Math.abs(attributes.id[0] - 10) < 1e-4, String(attributes.id));
+    // A range of zero width holds its one value.
+    assert.deepEqual(attributes.constant, [5]);
+    // Other attributes are returned as decoded.
+    assert.deepEqual(attributes.pair, [1002, 65533]);
+    assert.deepEqual(attributes.height, [-3]);
+    assert.deepEqual(attributes.count, [Math.fround(4_000_000_002)]);
+  } finally {
+    cloud.dispose();
+  }
+});
+
 test('attributes option selects decoded attributes and rejects unknown names', async () => {
   const files = {
     'metadata.json': JSON.stringify({ ...intensityMetadata, hierarchy: { firstChunkSize: 22 } }),

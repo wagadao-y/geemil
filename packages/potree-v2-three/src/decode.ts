@@ -40,6 +40,20 @@ const compactArrays: Partial<Record<PotreeV2AttributeType, new (length: number) 
 };
 
 /**
+ * How a 64-bit scalar attribute keeps useful precision in a GPU float: it is stored as
+ * `(value - offset) / span`, from metadata.json's min and max. Undefined for other attributes,
+ * which are stored as they are.
+ */
+export function attributeNormalization(attribute: PotreeV2Attribute): { offset: number; span: number } | undefined {
+  const min = attribute.min?.[0];
+  const max = attribute.max?.[0];
+  if (attribute.elementSize !== 8 || attribute.numElements !== 1 || !Number.isFinite(min) || !Number.isFinite(max)) {
+    return undefined;
+  }
+  return { offset: min!, span: max! - min! };
+}
+
+/**
  * Decode an attribute other than position and rgb into floats, or into its own type for
  * 8- and 16-bit integers. `start` is the byte offset of the first point's value and
  * `pointStride` the bytes between points.
@@ -51,12 +65,10 @@ function decodeGenericAttribute(
   const { numElements, elementSize, type } = attribute;
   const count = pointCount * numElements;
   const values = new (compactArrays[type] ?? Float32Array)(count);
-  // Preserve useful precision for 64-bit scalar values in a GPU float attribute.
-  const min = attribute.min?.[0];
-  const max = attribute.max?.[0];
-  const normalize = elementSize === 8 && numElements === 1 && Number.isFinite(min) && Number.isFinite(max);
-  const offset = normalize ? min! : 0;
-  const span = normalize ? max! - min! : 1;
+  const normalization = attributeNormalization(attribute);
+  const normalize = normalization !== undefined;
+  const offset = normalization?.offset ?? 0;
+  const span = normalization?.span ?? 1;
   if (span === 0) return values;
 
   // Contiguous, aligned values (Brotli columns, or a lone uncompressed attribute) are viewed in place.
