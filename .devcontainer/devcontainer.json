@@ -11,7 +11,16 @@
   },
   "customizations": {
     "vscode": {
-      "extensions": ["openai.chatgpt", "Anthropic.claude-code"]
+      "extensions": [
+        "openai.chatgpt",
+        "Anthropic.claude-code",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode"
+      ],
+      "settings": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode",
+        "editor.formatOnSave": true
+      }
     }
   },
   "forwardPorts": [5173],

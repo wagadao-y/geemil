@@ -57,31 +57,9 @@ export default defineConfig([
       ],
     },
   },
+  // typescript-eslint turns off no-undef for TypeScript, whose globals come from tsconfig's lib.
   {
-    files: [
-      'packages/potree-v2-three/src/**/*.ts',
-      'apps/playground/src/**/*.ts',
-      'apps/playground/e2e/harness.ts',
-    ],
-    languageOptions: { globals: globals.browser },
-  },
-  {
-    files: ['packages/potree-v2-three/src/decode-worker.ts'],
-    languageOptions: {
-      globals: {
-        ...Object.fromEntries(Object.keys(globals.browser).map((name) => [name, 'off'])),
-        ...globals.worker,
-      },
-    },
-  },
-  {
-    files: [
-      '*.mjs',
-      'packages/potree-v2-three/tests/**/*.mjs',
-      'apps/playground/playwright.config.ts',
-      'apps/playground/e2e/**/*.ts',
-    ],
-    ignores: ['apps/playground/e2e/harness.ts'],
+    files: ['**/*.mjs'],
     languageOptions: { globals: globals.node },
   },
   // Formatting belongs to Prettier; disable overlapping ESLint rules last.
