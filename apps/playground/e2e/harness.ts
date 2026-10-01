@@ -199,15 +199,21 @@ const harness = {
    * that pixel, and the front hits where the back cloud picked alone also has a point.
    * With `far`, the view is far away through a logarithmic depth buffer, and the red cloud is
    * just in front of the blue one, nearer than a standard depth buffer can tell apart there.
+   * With `same`, the red cloud is at the blue one's position, so every depth is equal; it is
+   * created second, so the display draws it last and it wins those ties.
    */
-  async pickAcrossClouds(url: string, far = false) {
+  async pickAcrossClouds(url: string, layout: 'aside' | 'far' | 'same' = 'aside') {
     if (cloud) {
       scene.remove(cloud.group)
       cloud.dispose()
       cloud = undefined
     }
     const options = { pointBudget: 10_000_000, minNodePixelSize: 10, pointColorType: 'solid' } as const
-    const [back, front] = await Promise.all([0, 1].map(() => loadPotreeV2(url, options)))
+    const far = layout === 'far'
+    // In creation order, which orders the display materials.
+    const [back, front] = layout === 'same'
+      ? [await loadPotreeV2(url, options), await loadPotreeV2(url, options)]
+      : await Promise.all([0, 1].map(() => loadPotreeV2(url, options)))
     const set = new PotreeV2PointCloudSet({ pointBudget: 10_000_000 })
     try {
       back!.material.color.set('#0000ff')
@@ -226,11 +232,11 @@ const harness = {
         camera.far = distance * 2
       }
       camera.updateProjectionMatrix()
-      // Far: straight toward the camera, so it covers the back cloud. Otherwise toward it and aside.
+      // Far: straight toward the camera, so it covers the back cloud. Aside: toward it and aside.
       if (far) front!.group.position.copy(direction).multiplyScalar(extent)
-      else front!.group.position.set(size.x * 0.3, -size.y * 0.5, 0)
-      // Front first: its pick shader is compiled first, so Three.js draws it before the back
-      // cloud, which then wins where their depths are equal.
+      else if (layout === 'aside') front!.group.position.set(size.x * 0.3, -size.y * 0.5, 0)
+      // Front first: its pick shader is compiled first, so unless the picker follows the display
+      // order, it draws the front cloud first and the back cloud wins where depths are equal.
       for (const current of [front!, back!]) {
         set.add(current)
         scene.add(current.group)

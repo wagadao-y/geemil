@@ -29,6 +29,8 @@ export interface PickLayer<Owner> {
   display: PotreeV2PointMaterial;
   /** World matrix of the cloud's group. */
   groupMatrix: Matrix4;
+  /** renderOrder of the cloud's group, which orders its draws before any material, as Three.js sorts them. */
+  groupOrder: number;
   targets: PickTarget[];
 }
 
@@ -144,6 +146,26 @@ class PickShader {
 
 /** What one proxy draws in the current pick. */
 type Drawn<Owner> = { layer: PickLayer<Owner>; target: PickTarget; shader: PickShader };
+
+/**
+ * Draw the proxies in the order Three.js draws the displayed nodes, so that points of equal
+ * depth resolve alike: the one drawn last wins. Three.js sorts opaque objects by group order,
+ * render order, material and then distance. Pick shaders are created in another order than
+ * the display materials, so the display's group order, render order and material become each
+ * proxy's render order; within one rank the proxies share a pick shader and sort by distance.
+ */
+function orderAsDisplayed(drawn: readonly Drawn<unknown>[], proxies: readonly Points[]): void {
+  // Every material has the id Three.js sorts by, but its type declarations omit it.
+  const keys = drawn.map(({ layer, target }) =>
+    [layer.groupOrder, target.points.renderOrder, (layer.display as unknown as { id: number }).id] as const);
+  const compare = (a: readonly number[], b: readonly number[]) => a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!;
+  const sorted = keys.map((_, index) => index).sort((a, b) => compare(keys[a]!, keys[b]!));
+  let rank = -1;
+  for (const [i, index] of sorted.entries()) {
+    if (i === 0 || compare(keys[index]!, keys[sorted[i - 1]!]!) !== 0) rank++;
+    proxies[index]!.renderOrder = rank;
+  }
+}
 
 let shared: PointPicker | undefined;
 
@@ -270,6 +292,7 @@ export class PointPicker {
       }
     }
     if (drawn.length === 0) return null;
+    orderAsDisplayed(drawn, this.proxies);
 
     const pixels = new Uint32Array(width * height * 4);
     const previousTarget = renderer.getRenderTarget();

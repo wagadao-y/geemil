@@ -1681,3 +1681,27 @@ test('update follows a camera whose parent moved since the last render', async (
     cloud.dispose();
   }
 });
+
+test('a cloud copies no payloads for a cache when its set disables the encoded cache', async () => {
+  const { fetcher } = flakyCloudFetcher(childFiles, {});
+  const cloud = await loadPotreeV2('https://example.test/cloud/metadata.json', {
+    fetch: fetcher, minNodePixelSize: 1, encodedCacheByteBudget: 1024,
+  });
+  const set = new PotreeV2PointCloudSet({ encodedCacheByteBudget: 0 });
+  set.add(cloud);
+  const slices = [];
+  const slice = ArrayBuffer.prototype.slice;
+  ArrayBuffer.prototype.slice = function (...args) {
+    slices.push(args);
+    return slice.apply(this, args);
+  };
+  try {
+    const camera = childViewCamera();
+    await waitFor(() => { set.update(camera, 600); return cloud.group.children.length === 2; });
+    assert.deepEqual(slices, []);
+    assert.equal(set.encodedCache.size, 0);
+  } finally {
+    ArrayBuffer.prototype.slice = slice;
+    cloud.dispose();
+  }
+});

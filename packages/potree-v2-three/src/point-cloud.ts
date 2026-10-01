@@ -550,7 +550,9 @@ export class PotreeV2PointCloud {
   /** The cache this cloud reads and stores encoded nodes in, or undefined when it caches none. */
   private get encodedCache(): EncodedNodeCache | undefined {
     if (this.ownEncodedCache.maxBytes <= 0) return undefined;
-    return cloudSets.get(this)?.encodedCache ?? this.ownEncodedCache;
+    const cache = cloudSets.get(this)?.encodedCache ?? this.ownEncodedCache;
+    // A set may disable its cache; then no payload is copied for it.
+    return cache.maxBytes > 0 ? cache : undefined;
   }
 
   /**
@@ -1442,7 +1444,10 @@ export class PotreeV2PointCloud {
     }
     this.group.updateWorldMatrix(true, false);
     this.picker ??= PointPicker.acquire();
-    return { owner: this, display: this.material, groupMatrix: this.group.matrixWorld, targets };
+    return {
+      owner: this, display: this.material, groupMatrix: this.group.matrixWorld,
+      groupOrder: this.group.renderOrder, targets,
+    };
   }
 
   private pickResult({ target, index, distance }: PickHit<PotreeV2PointCloud>, pixelRatio: number): PotreeV2PickResult {
