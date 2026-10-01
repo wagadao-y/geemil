@@ -17,8 +17,9 @@ export default defineConfig({
   globalSetup: './e2e/global-setup.ts',
   // Each test loads the sample's whole view; the software renderer draws it slowly.
   timeout: 120_000,
-  // The tests share one Vite server, and each one keeps a software GPU busy.
-  workers: 1,
+  // Each test opens its own page, so the tests of one file can run at once. The default
+  // workers, half the cores, leave cores to spare for each test's software GPU.
+  fullyParallel: true,
   forbidOnly: !!process.env.CI,
   reporter: process.env.CI ? 'github' : 'list',
   use: {
