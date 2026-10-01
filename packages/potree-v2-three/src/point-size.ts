@@ -1,6 +1,8 @@
 import { DataTexture, NearestFilter, RGBAIntegerFormat, UnsignedIntType, Vector3 } from 'three';
 import type { Box3 } from 'three';
 import type { OctreeNode } from './format.js';
+import { GRID, pointOccupancy } from './occupancy.js';
+import type { NodeExtent } from './occupancy.js';
 
 /**
  * `fixed`: `size` CSS pixels. `attenuated`: `size` times the root spacing, in world units.
@@ -21,38 +23,8 @@ export interface PointSizeSettings {
 /** Deepest octree level walked from a node; Potree v2 hierarchies are far shallower. */
 const MAX_DEPTH = 24;
 const TEXTURE_WIDTH = 2048;
-/** Cells per axis of the occupancy grid, as in Potree's decoder. */
-const GRID = 32;
-const occupiedCells = new Uint8Array(GRID ** 3);
 /** Potree's calibration: its lodOffset is half a level deeper than the surface estimate. */
 const POTREE_LOD_BIAS = 0.5;
-
-/** A node's size along x, y and z, in the cloud's local units. */
-export type NodeExtent = readonly [number, number, number];
-
-/**
- * Points per occupied cell of a 32³ grid over a node, truncated to an integer as
- * Potree's decoder does; 0 without points. Positions are relative to the node's minimum.
- * The decoder Workers count it, so that installing a node does not walk its points.
- */
-export function pointOccupancy(positions: ArrayLike<number>, extent: NodeExtent): number {
-  const count = positions.length / 3;
-  if (count === 0) return 0;
-  const [sx, sy, sz] = extent;
-  occupiedCells.fill(0);
-  let occupied = 0;
-  for (let i = 0; i < positions.length; i += 3) {
-    const ix = Math.min(GRID - 1, Math.max(0, Math.floor(positions[i]! / sx * GRID)));
-    const iy = Math.min(GRID - 1, Math.max(0, Math.floor(positions[i + 1]! / sy * GRID)));
-    const iz = Math.min(GRID - 1, Math.max(0, Math.floor(positions[i + 2]! / sz * GRID)));
-    const cell = ix + (iy + iz * GRID) * GRID;
-    if (occupiedCells[cell] === 0) {
-      occupiedCells[cell] = 1;
-      occupied++;
-    }
-  }
-  return Math.floor(count / occupied);
-}
 
 /**
  * Levels to add to a node's level so that it matches the node's measured point spacing.

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Worker as NodeWorker } from 'node:worker_threads';
 import { brotliCompressSync } from 'node:zlib';
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 import { DecoderPool } from '../dist/decoder-pool.js';
 import { decodeBatchNode } from '../dist/decode.js';
 import { makeNodeBatches } from '../dist/batches.js';
@@ -388,4 +389,20 @@ test('a load waiting for the backlog checks the new pool when the waited one fai
     failed.release();
     globalThis.Worker = originalWorker;
   }
+});
+
+test('the decoder worker imports only package modules, not Three.js', () => {
+  // Every Worker would otherwise load Three.js, and a bare specifier fails in unbundled Workers.
+  const seen = new Set();
+  const visit = url => {
+    if (seen.has(url.href)) return;
+    seen.add(url.href);
+    const source = readFileSync(url, 'utf8');
+    for (const [, specifier] of source.matchAll(/(?:\bfrom|\bimport\s*\(?)\s*['"]([^'"]+)['"]/g)) {
+      assert.ok(specifier.startsWith('.'), `${url.pathname} imports ${specifier}`);
+      visit(new URL(specifier, url));
+    }
+  };
+  visit(new URL('../dist/decode-worker.js', import.meta.url));
+  assert.ok([...seen].some(href => href.endsWith('/occupancy.js')));
 });

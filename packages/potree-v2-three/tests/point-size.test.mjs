@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Box3, Vector3 } from 'three';
+import { pointOccupancy } from '../dist/occupancy.js';
 import {
-  densityLevelOffset, occupancyLevelOffset, pointOccupancy, PointSizeUniforms, VisibleNodesTexture,
+  densityLevelOffset, occupancyLevelOffset, PointSizeUniforms, VisibleNodesTexture,
 } from '../dist/point-size.js';
 
 function node(name, box) {

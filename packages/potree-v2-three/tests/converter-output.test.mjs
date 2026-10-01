@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRoot, parseHierarchyChunk, validateMetadata } from '../dist/format.js';
-import { decodeNode } from '../dist/decode.js';
+import { decodeNode } from '../dist/node-geometry.js';
 import { loadPotreeV2 } from '../dist/index.js';
 
 const data = new URL('./data/pump-2000pts/', import.meta.url);

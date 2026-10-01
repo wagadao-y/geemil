@@ -4,13 +4,14 @@ import {
   Points, Sphere, Vector3,
 } from 'three';
 import type { Box3, WebGLRenderer } from 'three';
-import { createNodeGeometry, DEFAULT_DECODED_ATTRIBUTES, nodeOrigin } from './decode.js';
+import { DEFAULT_DECODED_ATTRIBUTES, nodeOrigin } from './decode.js';
 import type { DecodedBatchNode, DecodedNodeData } from './decode.js';
 import type { NodeDecodeTiming } from './decode.js';
 import { DecoderPool } from './decoder-pool.js';
 import { makeNodeBatches } from './batches.js';
 import type { NodeBatch } from './batches.js';
 import { EncodedNodeCache } from './encoded-cache.js';
+import { createNodeGeometry } from './node-geometry.js';
 import { createRoot, parseHierarchyChunk, validateMetadata } from './format.js';
 import type { OctreeNode, PotreeV2Metadata } from './format.js';
 import { fetchRange, responseError } from './http.js';
@@ -21,7 +22,8 @@ import { PotreeV2PointMaterial } from './material.js';
 import type { PotreeV2PointShape } from './material.js';
 import { colorTypeAttribute, PotreeV2Gradients } from './point-color.js';
 import type { PotreeV2Classification, PotreeV2Gradient, PotreeV2PointColorType } from './point-color.js';
-import { nodeExtent, occupancyLevelOffset, pointOccupancy, VisibleNodesTexture } from './point-size.js';
+import { pointOccupancy } from './occupancy.js';
+import { nodeExtent, occupancyLevelOffset, VisibleNodesTexture } from './point-size.js';
 import type { PotreeV2PointSizeType } from './point-size.js';
 import {
   appendClippingKey, clipBoxCount, clipNode, grownCapacity, NO_CLIP, sameKey, snapshotClipping,

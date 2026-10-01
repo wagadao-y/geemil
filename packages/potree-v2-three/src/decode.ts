@@ -1,8 +1,8 @@
-import { Box3, BufferAttribute, BufferGeometry, Sphere } from 'three';
+// Runs in the decoder Workers: keep this module free of Three.js imports (type imports are erased).
 import type { OctreeNode, PotreeV2Attribute, PotreeV2AttributeType, PotreeV2Metadata } from './format.js';
 import { decompressBrotli } from './brotli-codecs.js';
-import { pointOccupancy } from './point-size.js';
-import type { NodeExtent } from './point-size.js';
+import { pointOccupancy } from './occupancy.js';
+import type { NodeExtent } from './occupancy.js';
 
 /** DataView reader for one element type, chosen once per attribute instead of per value. */
 function elementReader(view: DataView, type: PotreeV2AttributeType): (at: number) => number {
@@ -324,32 +324,7 @@ function decodeAttributes(
   return attributes;
 }
 
-/**
- * Build the Three.js geometry on the render thread without copying decoded arrays.
- * Positions are relative to `box.min`, so the geometry's bounds are too.
- */
-export function createNodeGeometry(attributes: DecodedNodeData, box: Box3): BufferGeometry {
-  const geometry = new BufferGeometry();
-  for (const [name, attribute] of Object.entries(attributes)) {
-    geometry.setAttribute(name, new BufferAttribute(attribute.array, attribute.itemSize, attribute.normalized));
-  }
-  geometry.boundingBox = box.clone().translate(box.min.clone().negate());
-  geometry.boundingSphere = geometry.boundingBox.getBoundingSphere(new Sphere());
-  return geometry;
-}
-
 /** A node's box minimum, the origin of its decoded positions. */
 export function nodeOrigin(node: OctreeNode): NodeOrigin {
   return [node.box.min.x, node.box.min.y, node.box.min.z];
-}
-
-/** Decode one node locally, useful when Web Workers are unavailable. Positions are relative to `node.box.min`. */
-export async function decodeNode(
-  bytes: ArrayBuffer, node: OctreeNode, metadata: PotreeV2Metadata,
-  attributeNames: readonly string[] = DEFAULT_DECODED_ATTRIBUTES,
-): Promise<BufferGeometry> {
-  const attributes = await decodeNodeData(
-    bytes, node.name, node.numPoints, metadata, undefined, attributeNames, nodeOrigin(node),
-  );
-  return createNodeGeometry(attributes, node.box);
 }
