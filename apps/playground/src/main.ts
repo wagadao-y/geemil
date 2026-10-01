@@ -59,12 +59,14 @@ const settings = {
   solidColor: '#ffffff',
   gradient: 'SPECTRAL' as GradientName,
   intensityGamma: 1,
+  fov: 60,
   minPointSize: 2,
   maxPointSize: 50,
   pointBudgetMP: 2,
   minNodePixelSize: 30,
   maxNodesToGPUPerFrame: 8,
   showBoundingBoxes: false,
+  freezeView: false,
   hoverPick: true,
   pickRadius: 0,
   pixelRatio: Math.min(devicePixelRatio, 2),
@@ -171,6 +173,44 @@ sourceFolder.add(actions, 'loadUrl').name('URL を読み込む');
 sourceFolder.add(actions, 'chooseFiles').name('3ファイルを選択');
 sourceFolder.add(actions, 'reload').name('同じデータを再読み込み');
 const appearanceFolder = gui.addFolder('表示');
+appearanceFolder
+  .add(settings, 'pointBudgetMP', 0.5, 20, 0.5)
+  .name('点数予算 (MP)')
+  .onChange((value: number) => {
+    clouds.pointBudget = value * 1_000_000;
+  });
+appearanceFolder
+  .add(settings, 'fov', 20, 100, 1)
+  .name('視野角 (°)')
+  .onChange((value: number) => {
+    camera.fov = value;
+    camera.updateProjectionMatrix();
+    requestRender();
+  });
+appearanceFolder.add(settings, 'edl').name('EDL').onChange(requestRender);
+appearanceFolder
+  .add(settings, 'edlRadius', 0.5, 4, 0.1)
+  .name('EDL の半径 (px)')
+  .onChange(requestRender);
+appearanceFolder.add(settings, 'edlStrength', 0, 5, 0.1).name('EDL の強さ').onChange(requestRender);
+appearanceFolder
+  .add(settings, 'minNodePixelSize', 0, 200, 1)
+  .name('最小ノード投影半径 (px)')
+  .onChange((value: number) => {
+    if (cloud) cloud.minNodePixelSize = value;
+  });
+appearanceFolder
+  .add(settings, 'showBoundingBoxes')
+  .name('ノードの bbox を表示')
+  .onChange((value: boolean) => {
+    if (cloud) cloud.showBoundingBoxes = value;
+  });
+appearanceFolder
+  .add(settings, 'freezeView')
+  .name('ビューを固定')
+  .onChange((value: boolean) => {
+    lodView = value ? { camera: camera.clone(), height: viewport.clientHeight } : undefined;
+  });
 // `size` is pixels for fixed and a spacing factor otherwise, so each type keeps its own value.
 const pointSizes: Record<PotreeV2PointSizeType, number> = {
   fixed: settings.pointSize,
@@ -213,36 +253,6 @@ appearanceFolder
   .onChange((value: PotreeV2PointShape) => {
     if (cloud) cloud.material.shape = value;
     requestRender();
-  });
-appearanceFolder.add(settings, 'edl').name('EDL').onChange(requestRender);
-appearanceFolder.add(settings, 'edlStrength', 0, 5, 0.1).name('EDL の強さ').onChange(requestRender);
-appearanceFolder
-  .add(settings, 'edlRadius', 0.5, 4, 0.1)
-  .name('EDL の半径 (px)')
-  .onChange(requestRender);
-appearanceFolder
-  .add(settings, 'pointBudgetMP', 0.5, 20, 0.5)
-  .name('点数予算 (MP)')
-  .onChange((value: number) => {
-    clouds.pointBudget = value * 1_000_000;
-  });
-appearanceFolder
-  .add(settings, 'minNodePixelSize', 0, 200, 1)
-  .name('最小ノード投影半径 (px)')
-  .onChange((value: number) => {
-    if (cloud) cloud.minNodePixelSize = value;
-  });
-appearanceFolder
-  .add(settings, 'maxNodesToGPUPerFrame', [1, 2, 4, 8, 16, 32, 64])
-  .name('1フレームの追加ノード数')
-  .onChange((value: number) => {
-    clouds.maxNodesToGPUPerFrame = value;
-  });
-appearanceFolder
-  .add(settings, 'showBoundingBoxes')
-  .name('ノードの bbox を表示')
-  .onChange((value: boolean) => {
-    if (cloud) cloud.showBoundingBoxes = value;
   });
 const colorFolder = gui.addFolder('色');
 const colorTypeController = colorFolder
@@ -308,6 +318,7 @@ for (const [code, name] of Object.entries(classNames)) {
     });
 }
 classFolder.close();
+colorFolder.close();
 const clipFolder = gui.addFolder('クリッピング');
 const boxFolder = clipFolder.addFolder('ボックス');
 boxFolder.add(clipSettings, 'boxEnabled').name('有効');
@@ -354,6 +365,7 @@ const pickControllers = [
   pickFolder.add(picked, 'position').name('座標').disable(),
   pickFolder.add(picked, 'attributes').name('属性').disable(),
 ];
+pickFolder.close();
 const infoFolder = gui.addFolder('データ情報');
 const infoControllers = [
   infoFolder.add(info, 'source').name('読み込み元').disable(),
@@ -370,11 +382,18 @@ const statControllers = [
   statsFolder.add(fetchStats, 'average').name('平均ノード/リクエスト').disable(),
 ];
 statsFolder.add(actions, 'clearFetchStats').name('カウントをクリア');
+statsFolder.close();
 const performanceFolder = gui.addFolder('描画性能');
 performanceFolder
   .add(settings, 'continuousRender')
   .name('毎フレーム描画（計測用）')
   .onChange(requestRender);
+performanceFolder
+  .add(settings, 'maxNodesToGPUPerFrame', [1, 2, 4, 8, 16, 32, 64])
+  .name('1フレームの追加ノード数')
+  .onChange((value: number) => {
+    clouds.maxNodesToGPUPerFrame = value;
+  });
 const pixelRatios: Record<string, number> = { '0.5': 0.5, '1': 1, '1.5': 1.5, '2': 2 };
 pixelRatios[`端末の値 (${devicePixelRatio})`] = devicePixelRatio;
 performanceFolder
@@ -426,7 +445,7 @@ timingFolder.add(actions, 'copyMeasurement').name('計測結果をコピー');
 timingFolder.close();
 
 const scene = new Scene();
-const camera = new PerspectiveCamera(60, 1, 0.01, 1_000_000);
+const camera = new PerspectiveCamera(settings.fov, 1, 0.01, 1_000_000);
 camera.up.set(0, 0, 1);
 camera.position.set(10, -10, 10);
 // MSAA costs more than it gains for square point sprites.
@@ -482,6 +501,8 @@ let pickedPosition: Vector3 | undefined;
 const markerPosition = new Vector3();
 // OrbitControls moved the camera this frame, by dragging or damping.
 let cameraMoving = false;
+/** Snapshot of the view the nodes are selected for while the view is frozen. */
+let lodView: { camera: PerspectiveCamera; height: number } | undefined;
 
 function requestRender() {
   renderRequested = true;
@@ -801,7 +822,11 @@ function animate() {
   // OrbitControls reports movement, including damping after the pointer is released.
   cameraMoving = controls.update();
   if (cameraMoving) requestRender();
-  if (clouds.update(camera, viewport.clientHeight)) requestRender();
+  // A frozen view keeps selecting and loading the nodes of its snapshot.
+  const updated = lodView
+    ? clouds.update(lodView.camera, lodView.height)
+    : clouds.update(camera, viewport.clientHeight);
+  if (updated) requestRender();
   updateFetchStats();
   const now = performance.now();
   if (now - lastTimingDisplayAt >= 200) {
