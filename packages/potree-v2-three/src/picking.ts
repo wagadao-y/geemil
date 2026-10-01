@@ -331,10 +331,7 @@ export class PointPicker {
 
     // From the parents down, as update() does, so that a camera in a moved rig is current.
     camera.updateWorldMatrix(true, false);
-    const pickCamera = new (camera.constructor as new () => PickCamera)().copy(
-      camera as never,
-      false,
-    ) as PickCamera;
+    const pickCamera = new (camera.constructor as new () => PickCamera)().copy(camera, false);
     // Keep the copied world matrices; recomputing them would drop a parent's transform.
     pickCamera.matrixWorldAutoUpdate = false;
     // Crop the existing projection to this region of the viewport. Keeping the original
@@ -402,8 +399,8 @@ export class PointPicker {
     const previousClearColor = renderer.getClearColor(this.clearColor);
     const previousClearAlpha = renderer.getClearAlpha();
     const previousAutoClear = renderer.autoClear;
-    let packBuffer: WebGLBuffer | null = null;
-    let sync: WebGLSync | null = null;
+    let packBuffer: WebGLBuffer | null;
+    let sync: WebGLSync | null;
     try {
       this.renderTarget.setSize(width, height);
       renderer.setRenderTarget(this.renderTarget);
@@ -484,9 +481,9 @@ export class PointPicker {
         shader.material.uniforms.nodeId!.value = id;
         shader.material.uniformsNeedUpdate = true;
       };
-      this.proxies[index] = proxy as Points<BufferGeometry, ShaderMaterial>;
+      this.proxies[index] = proxy;
     }
-    return proxy as Points<BufferGeometry, ShaderMaterial>;
+    return proxy;
   }
 
   private dispose(): void {

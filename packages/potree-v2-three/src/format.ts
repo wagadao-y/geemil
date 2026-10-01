@@ -182,6 +182,11 @@ function isFiniteVector(value: readonly unknown[]): value is readonly [number, n
   return value.length === 3 && value.every(Number.isFinite);
 }
 
+/** Avoid Array.isArray's any[] narrowing when validating readonly typed arrays. */
+function isArray(value: unknown): value is readonly unknown[] {
+  return Array.isArray(value);
+}
+
 export function validateMetadata(value: unknown): PotreeV2Metadata {
   if (typeof value !== 'object' || value === null) throw new Error('Invalid Potree metadata');
   const m = value as PotreeV2Metadata;
@@ -191,15 +196,14 @@ export function validateMetadata(value: unknown): PotreeV2Metadata {
       `Unsupported Potree v2 encoding: ${String(m.encoding)} (supported: DEFAULT, BROTLI)`,
     );
   }
-  // Array.isArray() narrows a readonly array to any[]; the checks go through unknown to keep the types.
-  if (!Array.isArray(m.attributes as unknown) || !m.attributes.some((a) => a.name === 'position')) {
+  if (!isArray(m.attributes) || !m.attributes.some((a) => a.name === 'position')) {
     throw new Error('Potree v2 metadata has no position attribute');
   }
   if (
-    !Array.isArray(m.scale as unknown) ||
-    !Array.isArray(m.offset as unknown) ||
-    !Array.isArray(m.boundingBox?.min as unknown) ||
-    !Array.isArray(m.boundingBox?.max as unknown) ||
+    !isArray(m.scale) ||
+    !isArray(m.offset) ||
+    !isArray(m.boundingBox?.min) ||
+    !isArray(m.boundingBox?.max) ||
     typeof m.hierarchy !== 'object' ||
     m.hierarchy === null
   ) {

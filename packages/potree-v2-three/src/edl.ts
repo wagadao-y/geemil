@@ -232,7 +232,7 @@ export class PotreeV2EDL {
     const { near, far } = camera as unknown as { near: number; far: number };
     u.cameraNear!.value = near;
     u.cameraFar!.value = far;
-    u.resolution!.value.copy(this.size);
+    (u.resolution!.value as Vector2).copy(this.size);
     // Potree draws at CSS resolution; scale so the outline width matches on high-DPI screens.
     u.radius!.value = this.radius * renderer.getPixelRatio();
     u.strength!.value = this.strength;

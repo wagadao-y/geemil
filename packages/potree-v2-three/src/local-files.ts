@@ -48,6 +48,8 @@ export async function loadPotreeV2FromFiles(
 ): Promise<PotreeV2PointCloud> {
   const selected = selectPotreeV2Files(files);
   const localBase = new URL('https://potree-v2.local/metadata.json');
+  // Match fetch's Promise API, including turning synchronous errors into rejections.
+  // eslint-disable-next-line @typescript-eslint/require-await
   const localFetch: typeof fetch = async (input, init) => {
     const url = input instanceof Request ? new URL(input.url) : new URL(String(input));
     const name = url.pathname.slice(1) as RequiredName;

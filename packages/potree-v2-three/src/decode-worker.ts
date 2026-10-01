@@ -38,7 +38,11 @@ const scope = globalThis as unknown as {
   postMessage: (message: DecodeResponse, transfer?: Transferable[]) => void;
 };
 
-scope.onmessage = async (event) => {
+scope.onmessage = (event) => {
+  void handleMessage(event);
+};
+
+async function handleMessage(event: MessageEvent<DecodeRequest | WarmRequest>): Promise<void> {
   if ('warm' in event.data) {
     // A failed initialization is retried, and reported, by the first decode.
     if (event.data.brotli) await initBrotli().catch(() => {});
@@ -91,4 +95,4 @@ scope.onmessage = async (event) => {
   } catch (error) {
     scope.postMessage({ id, error: error instanceof Error ? error.message : String(error) });
   }
-};
+}

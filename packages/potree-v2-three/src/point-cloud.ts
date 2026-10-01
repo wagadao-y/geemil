@@ -1823,7 +1823,7 @@ function projectedRadius(
   box.getBoundingSphere(sphere).applyMatrix4(worldMatrix);
   // Pixels per world unit (at distance 1 for perspective cameras), read from the matrix
   // the view is rendered with, so `zoom` and view offsets count as they do on screen.
-  const pixelsPerUnit = (camera.projectionMatrix.elements[5]! * height) / 2;
+  const pixelsPerUnit = (camera.projectionMatrix.elements[5] * height) / 2;
   // Flags rather than instanceof, which fails when two copies of Three.js are bundled.
   if ((camera as OrthographicCamera).isOrthographicCamera === true)
     return sphere.radius * pixelsPerUnit;

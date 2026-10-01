@@ -324,9 +324,9 @@ function decodeAttributes(
       const values = new Float32Array(pointCount * 3);
       const [sx, sy, sz] = metadata.scale;
       // Offsets are combined in double precision; only the node-relative result is float32.
-      const ox = metadata.offset[0]! - metadata.boundingBox.min[0]! - origin[0];
-      const oy = metadata.offset[1]! - metadata.boundingBox.min[1]! - origin[1];
-      const oz = metadata.offset[2]! - metadata.boundingBox.min[2]! - origin[2];
+      const ox = metadata.offset[0] - metadata.boundingBox.min[0] - origin[0];
+      const oy = metadata.offset[1] - metadata.boundingBox.min[1] - origin[1];
+      const oz = metadata.offset[2] - metadata.boundingBox.min[2] - origin[2];
       if (compressed) {
         // Converter stores the high and low 48-bit Morton codes in that order.
         for (let i = 0; i < pointCount; i++) {
@@ -348,17 +348,17 @@ function decodeAttributes(
             lz |= mortonZ[low]!;
           }
           const output = i * 3;
-          values[output] = ((hx << 16) | lx) * sx! + ox;
-          values[output + 1] = ((hy << 16) | ly) * sy! + oy;
-          values[output + 2] = ((hz << 16) | lz) * sz! + oz;
+          values[output] = ((hx << 16) | lx) * sx + ox;
+          values[output + 1] = ((hy << 16) | ly) * sy + oy;
+          values[output + 2] = ((hz << 16) | lz) * sz + oz;
         }
       } else {
         for (let i = 0; i < pointCount; i++) {
           const at = attributeOffset + i * stride;
           const output = i * 3;
-          values[output] = view.getInt32(at, true) * sx! + ox;
-          values[output + 1] = view.getInt32(at + 4, true) * sy! + oy;
-          values[output + 2] = view.getInt32(at + 8, true) * sz! + oz;
+          values[output] = view.getInt32(at, true) * sx + ox;
+          values[output + 1] = view.getInt32(at + 4, true) * sy + oy;
+          values[output + 2] = view.getInt32(at + 8, true) * sz + oz;
         }
       }
       attributes.position = { array: values, itemSize: 3, normalized: false };
