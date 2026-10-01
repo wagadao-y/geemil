@@ -275,7 +275,10 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
    */
   setNode(node: OctreeNode, clip: NodeClip, origin: Vector3): void {
     const clipChanged = this.clip.write(clip, origin);
-    const nodeChanged = this.pointSize.writeNode(node, this.visibleNodes.index(node));
+    // The node uniforms are written for every size type, so a recompiled adaptive shader starts
+    // with them, but only the adaptive shader reads them: other types upload nothing per node.
+    const nodeChanged = this.pointSize.writeNode(node, this.visibleNodes.index(node)) &&
+      this.pointSizeType === 'adaptive';
     let elevationChanged = false;
     if (this.pointColorType === 'elevation') {
       // Combined in double precision; the float32 node-local z only adds a small value.

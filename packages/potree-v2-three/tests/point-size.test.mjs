@@ -5,6 +5,9 @@ import { pointOccupancy } from '../dist/occupancy.js';
 import {
   densityLevelOffset, occupancyLevelOffset, PointSizeUniforms, VisibleNodesTexture,
 } from '../dist/point-size.js';
+import { PotreeV2PointMaterial } from '../dist/material.js';
+import { NO_CLIP } from '../dist/clipping.js';
+import { PotreeV2Gradients } from '../dist/point-color.js';
 
 function node(name, box) {
   return { name, level: name.length - 1, box, children: [] };
@@ -155,4 +158,36 @@ test('point size uniforms scale only pixel sizes by the pixel ratio', () => {
   assert.equal(uniforms.uniforms.size.value, 1.5);
   assert.equal(uniforms.uniforms.minPointSize.value, 4);
   nodes.dispose();
+});
+
+test('only the adaptive size type uploads uniforms for each node', () => {
+  const root = node('r', new Box3(new Vector3(0, 0, 0), new Vector3(8, 8, 8)));
+  const child = addChild(root, 1);
+  const visibleNodes = new VisibleNodesTexture();
+  visibleNodes.update([root, child], () => 0);
+  const material = new PotreeV2PointMaterial({
+    size: 1, shape: 'square', sizeType: 'fixed', minSize: 2, maxSize: 50, spacing: 1, visibleNodes,
+    attributes: ['position', 'rgb'], colorType: 'rgb', sourceOriginZ: 0, elevationRange: [0, 8],
+    intensityRange: [0, 65535], gradient: PotreeV2Gradients.SPECTRAL,
+  });
+  const draw = target => {
+    material.uniformsNeedUpdate = false;
+    material.setNode(target, NO_CLIP, target.box.min);
+    return material.uniformsNeedUpdate;
+  };
+  try {
+    assert.equal(draw(root), false);
+    assert.equal(draw(child), false);
+    // The values are kept current, so the recompiled adaptive shader starts with them.
+    assert.equal(material.uniforms.nodeIndex.value, 1);
+    assert.equal(material.uniforms.nodeLevel.value, 1);
+
+    material.sizeType = 'adaptive';
+    assert.equal(draw(root), true);
+    assert.equal(draw(root), false);
+    assert.equal(draw(child), true);
+  } finally {
+    material.dispose();
+    visibleNodes.dispose();
+  }
 });
