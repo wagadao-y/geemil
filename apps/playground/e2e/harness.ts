@@ -37,6 +37,13 @@ export interface ColorSettings {
   intensityGamma?: number
 }
 
+/** Display `target` through a set of its own with `pointBudget`. */
+function display(target: PotreeV2PointCloud, pointBudget: number) {
+  const set = new PotreeV2PointCloudSet({ pointBudget })
+  set.add(target)
+  return set
+}
+
 /**
  * Call `update` every 20 ms, as a render loop would, until `loaded` resolves; it gets a signal
  * that aborts after `timeoutMs`.
@@ -56,12 +63,13 @@ async function updateUntilLoaded(
 
 const harness = {
   /** Load `url` in place of the current cloud and wait until the fixed view is loaded. */
-  async load(url: string, options: Pick<PotreeV2Options, 'attributes' | 'pointColorType'> = {}) {
+  async load(url: string, options: Pick<PotreeV2Options, 'attributes' | 'material'> = {}) {
     if (cloud) {
       scene.remove(cloud.group)
       cloud.dispose()
     }
-    cloud = await loadPotreeV2(url, { ...options, pointBudget: 10_000_000, minNodePixelSize: 10 })
+    cloud = await loadPotreeV2(url, { ...options, minNodePixelSize: 10 })
+    const set = display(cloud, 10_000_000)
     scene.add(cloud.group)
     const box = cloud.boundingBox
     const center = box.getCenter(new Vector3())
@@ -71,7 +79,7 @@ const harness = {
     camera.lookAt(center)
     const loading = cloud
     await updateUntilLoaded(
-      signal => loading.whenLoaded({ signal }), () => loading.update(camera, SIZE), 60_000, 'The view did not finish loading',
+      signal => loading.whenLoaded({ signal }), () => set.update(camera, SIZE), 60_000, 'The view did not finish loading',
     )
     return {
       encoding: cloud.metadata.encoding,
@@ -154,7 +162,9 @@ const harness = {
       cloud.dispose()
       cloud = undefined
     }
-    const clouds = await Promise.all([0, 1].map(() => loadPotreeV2(url, { pointBudget: 10_000_000, minNodePixelSize: 10 })))
+    const clouds = await Promise.all([0, 1].map(() => loadPotreeV2(url, { minNodePixelSize: 10 })))
+    // A set for each cloud, so that each selects on its own budget.
+    const sets = clouds.map(current => display(current, 10_000_000))
     try {
       const size = clouds[0]!.boundingBox.getSize(new Vector3())
       clouds[1]!.group.position.x = size.x * 1.5
@@ -163,7 +173,7 @@ const harness = {
       const planes = [new Plane(new Vector3(0, 0, 1), -middle), new Plane(new Vector3(0, 0, -1), middle)]
       clouds.forEach((current, i) => {
         // The root count is internal; use its actual count rather than the old budget exception.
-        if (rootOnly) current.pointBudget = (current as unknown as { root: { numPoints: number } }).root.numPoints
+        if (rootOnly) sets[i]!.pointBudget = (current as unknown as { root: { numPoints: number } }).root.numPoints
         current.clipping = new PotreeV2Clipping()
         current.clipping.addPlane({ plane: planes[i]!, prune: false })
         scene.add(current.group)
@@ -175,7 +185,7 @@ const harness = {
       camera.lookAt(center)
       await updateUntilLoaded(
         signal => Promise.all(clouds.map(current => current.whenLoaded({ signal }))),
-        () => { for (const current of clouds) current.update(camera, SIZE) },
+        () => { for (const set of sets) set.update(camera, SIZE) },
         60_000, 'The view did not finish loading',
       )
       const alone = clouds.map(current => {
@@ -225,7 +235,7 @@ const harness = {
       cloud = undefined
     }
     // Large sprites, so the sparse sample covers most of the grid of picks.
-    const options = { pointBudget: 10_000_000, minNodePixelSize: 10, pointColorType: 'solid', pointSize: 8 } as const
+    const options = { minNodePixelSize: 10, material: { colorType: 'solid', size: 8 } } as const
     const far = layout === 'far'
     // In creation order, which orders the display materials.
     const [back, front] = layout === 'same'
@@ -298,16 +308,15 @@ const harness = {
       cloud.dispose()
       cloud = undefined
     }
-    const flat = await loadPotreeV2(url, {
-      pointBudget: 3, minNodePixelSize: 1, pointSize: 10, maxNodesToGPUPerFrame: 8,
-    })
+    const flat = await loadPotreeV2(url, { minNodePixelSize: 1, material: { size: 10 } })
+    const flatSet = display(flat, 3)
     // Straight down -z, with no rotation or perspective to perturb equal depths.
     const overhead = new OrthographicCamera(-4, 4, 4, -4, 0.1, 100)
     overhead.position.set(4, 2, 20)
     scene.add(flat.group)
     try {
       await updateUntilLoaded(
-        signal => flat.whenLoaded({ signal }), () => flat.update(overhead, SIZE), 10_000,
+        signal => flat.whenLoaded({ signal }), () => flatSet.update(overhead, SIZE), 10_000,
         'The flat sibling view did not finish loading',
       )
       const points = flat.group.children.filter(object => object.type === 'Points')
@@ -341,7 +350,8 @@ const harness = {
   /** One root point at the centre of a partial viewport, with optional camera layers. */
   async viewportPoint(url: string, left: number, bottom: number, width: number, height: number, pixelRatio: number, layer: number,
     options: { perspective?: boolean; viewOffset?: boolean; renderTarget?: boolean } = {}) {
-    const sample = await loadPotreeV2(url, { pointBudget: 1, pointSize: 10, pointColorType: 'solid' })
+    const sample = await loadPotreeV2(url, { material: { size: 10, colorType: 'solid' } })
+    const sampleSet = display(sample, 1)
     const view = options.perspective
       ? new PerspectiveCamera(60, width / height, 0.1, 100)
       : new OrthographicCamera(-4, 4, 4, -4, 0.1, 100)
@@ -363,7 +373,7 @@ const harness = {
     try {
       // Node objects take the group's layers, including those created by update().
       sample.group.layers.set(layer)
-      sample.update(view, height)
+      sampleSet.update(view, height)
       const measure = () => {
         const context = renderer.getContext()
         const pixels = new Uint8Array(SIZE * SIZE * pixelRatio * pixelRatio * 4)

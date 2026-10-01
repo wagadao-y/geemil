@@ -40,18 +40,15 @@ test('a classification scheme starts with Potree colors and stores sRGB bytes an
   scheme.dispose();
 });
 
-function material(options = {}) {
+function material(options = {}, attributes = ['position']) {
   return new PotreeV2PointMaterial({
-    size: 2, shape: 'square', sizeType: 'fixed', minSize: 2, maxSize: 50, spacing: 1,
-    visibleNodes: new VisibleNodesTexture(), attributes: ['position'], colorType: 'elevation',
-    sourceOriginZ: 100, elevationRange: [100, 110], intensityRange: [0, 65535],
-    gradient: PotreeV2Gradients.SPECTRAL, ...options,
-  });
+    colorType: 'elevation', elevationRange: [100, 110], intensityRange: [0, 65535], ...options,
+  }, { spacing: 1, visibleNodes: new VisibleNodesTexture(), attributes, sourceOriginZ: 100 });
 }
 
 test('color types need their decoded attribute', () => {
   assert.throws(() => material({ colorType: 'intensity' }), /intensity/);
-  const m = material({ attributes: ['position', 'rgb', 'classification'] });
+  const m = material({}, ['position', 'rgb', 'classification']);
   assert.equal(m.defines.POINT_COLOR_ELEVATION, '');
   assert.equal(m.defines.POTREE_CLASSIFICATION, '');
   m.colorType = 'classification';

@@ -1,7 +1,7 @@
 import './style.css'
 import {
   loadPotreeV2, loadPotreeV2FromFiles, PotreeV2Classification, PotreeV2Clipping, PotreeV2EDL, PotreeV2Gradients,
-  selectPotreeV2Files,
+  PotreeV2PointCloudSet, selectPotreeV2Files,
   type PotreeV2ClipBoxMode, type PotreeV2PickResult, type PotreeV2PointCloud, type PotreeV2PointColorType,
   type PotreeV2PointShape, type PotreeV2PointSizeType,
 } from '@geemil/potree-v2-three'
@@ -150,14 +150,14 @@ appearanceFolder.add(settings, 'edl').name('EDL').onChange(requestRender)
 appearanceFolder.add(settings, 'edlStrength', 0, 5, 0.1).name('EDL の強さ').onChange(requestRender)
 appearanceFolder.add(settings, 'edlRadius', 0.5, 4, 0.1).name('EDL の半径 (px)').onChange(requestRender)
 appearanceFolder.add(settings, 'pointBudgetMP', 0.5, 20, 0.5).name('点数予算 (MP)').onChange((value: number) => {
-  if (cloud) cloud.pointBudget = value * 1_000_000
+  clouds.pointBudget = value * 1_000_000
 })
 appearanceFolder.add(settings, 'minNodePixelSize', 0, 200, 1).name('最小ノード投影半径 (px)').onChange((value: number) => {
   if (cloud) cloud.minNodePixelSize = value
 })
 appearanceFolder.add(settings, 'maxNodesToGPUPerFrame', [1, 2, 4, 8, 16, 32, 64])
   .name('1フレームの追加ノード数').onChange((value: number) => {
-    if (cloud) cloud.maxNodesToGPUPerFrame = value
+    clouds.maxNodesToGPUPerFrame = value
   })
 appearanceFolder.add(settings, 'showBoundingBoxes').name('ノードの bbox を表示').onChange((value: boolean) => {
   if (cloud) cloud.showBoundingBoxes = value
@@ -327,6 +327,11 @@ clipBoxHelper.visible = false
 scene.add(clipBoxHelper)
 
 let cloud: PotreeV2PointCloud | undefined
+/** Selects and loads the nodes of the displayed cloud; dispose() removes a cloud from it. */
+const clouds = new PotreeV2PointCloudSet({
+  pointBudget: settings.pointBudgetMP * 1_000_000,
+  maxNodesToGPUPerFrame: settings.maxNodesToGPUPerFrame,
+})
 let currentLoader: (() => Promise<PotreeV2PointCloud>) | undefined
 let currentSource = '—'
 let currentUrl: string | undefined
@@ -503,10 +508,9 @@ async function openCloud(loader: () => Promise<PotreeV2PointCloud>, source: stri
     const next = await loader()
     if (current !== requestId) { next.dispose(); return }
     cloud = next
+    clouds.add(next)
     updateFetchStats()
     updateTiming()
-    next.material.color.set(settings.solidColor)
-    next.material.intensityGamma = settings.intensityGamma
     applyColorType(next)
     scene.add(next.group)
     if (!keepCamera) fitCloud(next)
@@ -546,18 +550,20 @@ function applyColorType(target: PotreeV2PointCloud) {
 
 function loadOptions() {
   return {
-    pointSize: settings.pointSize,
-    pointShape: settings.pointShape,
-    pointSizeType: settings.pointSizeType,
-    minPointSize: settings.minPointSize,
-    maxPointSize: settings.maxPointSize,
-    pointBudget: settings.pointBudgetMP * 1_000_000,
+    material: {
+      size: settings.pointSize,
+      shape: settings.pointShape,
+      sizeType: settings.pointSizeType,
+      minSize: settings.minPointSize,
+      maxSize: settings.maxPointSize,
+      color: settings.solidColor,
+      gradient: PotreeV2Gradients[settings.gradient],
+      intensityGamma: settings.intensityGamma,
+      classification,
+    },
     minNodePixelSize: settings.minNodePixelSize,
-    maxNodesToGPUPerFrame: settings.maxNodesToGPUPerFrame,
     showBoundingBoxes: settings.showBoundingBoxes,
     attributes: decodedAttributes,
-    gradient: PotreeV2Gradients[settings.gradient],
-    classification,
     clipping,
     onError: (error: Error, node: string) => setStatus(`${node}: ${error.message}`, true),
   }
@@ -617,7 +623,7 @@ function animate() {
   // OrbitControls reports movement, including damping after the pointer is released.
   cameraMoving = controls.update()
   if (cameraMoving) requestRender()
-  if (cloud?.update(camera, viewport.clientHeight)) requestRender()
+  if (clouds.update(camera, viewport.clientHeight)) requestRender()
   updateFetchStats()
   const now = performance.now()
   if (now - lastTimingDisplayAt >= 200) {

@@ -65,6 +65,6 @@ export async function loadPotreeV2FromFiles(
     });
   };
   return PotreeV2PointCloud.load(localBase, {
-    ...options, fetch: localFetch, encodedCacheByteBudget: options.encodedCacheByteBudget ?? 0,
+    ...options, fetch: localFetch, cacheEncodedNodes: options.cacheEncodedNodes ?? false,
   });
 }

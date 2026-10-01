@@ -9,7 +9,7 @@ import type { NodeDecodeTiming } from './decode.js';
 import { DecoderPool } from './decoder-pool.js';
 import { makeNodeBatches } from './batches.js';
 import type { NodeBatch } from './batches.js';
-import { EncodedNodeCache } from './encoded-cache.js';
+import type { EncodedNodeCache } from './encoded-cache.js';
 import { createNodeGeometry } from './node-geometry.js';
 import { createRoot, parseHierarchyChunk, validateMetadata } from './format.js';
 import type { OctreeNode, PotreeV2Metadata } from './format.js';
@@ -19,71 +19,39 @@ import { LoadWaiters } from './load-waiters.js';
 import { PointPicker } from './picking.js';
 import type { PickHit, PickLayer, PickTarget } from './picking.js';
 import { PotreeV2PointMaterial } from './material.js';
-import type { PotreeV2PointShape } from './material.js';
-import { colorTypeAttribute, PotreeV2Gradients } from './point-color.js';
-import type { PotreeV2Classification, PotreeV2Gradient, PotreeV2PointColorType } from './point-color.js';
+import type { PotreeV2PointMaterialOptions } from './material.js';
+import { colorTypeAttribute } from './point-color.js';
+import type { PotreeV2PointColorType } from './point-color.js';
 import { pointOccupancy } from './occupancy.js';
 import { nodeExtent, occupancyLevelOffset, VisibleNodesTexture } from './point-size.js';
-import type { PotreeV2PointSizeType } from './point-size.js';
 import {
   appendClippingKey, clipBoxCount, clipNode, grownCapacity, NO_CLIP, sameKey, snapshotClipping,
 } from './clipping.js';
 import type { ClipSnapshot, NodeClip, PotreeV2Clipping } from './clipping.js';
 
 export interface PotreeV2Options {
-  /** Maximum points selected for display per update. Default: 2,000,000. Unused in a PotreeV2PointCloudSet. */
-  pointBudget?: number;
-  /** Override the decoded cache limit. Default: twice the current pointBudget. Unused in a PotreeV2PointCloudSet. */
-  cachePointBudget?: number;
-  /**
-   * Byte limit for octree payloads before decoding; 0 disables that cache. Default: 128 MiB
-   * for BROTLI, otherwise 0. In a PotreeV2PointCloudSet a cloud above 0 uses the set's cache instead.
-   */
-  encodedCacheByteBudget?: number;
   /** Minimum projected node radius in pixels for loading children. Default: 30, as in Potree. */
   minNodePixelSize?: number;
-  /**
-   * Simultaneous HTTP range requests for hierarchy chunks and octree batches. Default: 6.
-   * Unused in a PotreeV2PointCloudSet.
-   */
-  maxConcurrentLoads?: number;
   /**
    * Decoder Workers. All clouds share one pool, sized by the largest request among
    * live clouds. Default: hardwareConcurrency - 1, between 1 and 4.
    */
   decoderWorkers?: number;
-  /** Maximum decoded nodes installed as Three.js objects per update. Default: 8. Unused in a PotreeV2PointCloudSet. */
-  maxNodesToGPUPerFrame?: number;
-  /** Point size in CSS pixels. Default: 2. */
-  pointSize?: number;
-  /** Point sprite shape; also the area a pick hits. Default: `'square'`, as in Potree. */
-  pointShape?: PotreeV2PointShape;
-  /** How `pointSize` becomes pixels. Default: `'fixed'`. */
-  pointSizeType?: PotreeV2PointSizeType;
-  /** Lower point size limit in CSS pixels for `attenuated` and `adaptive`. Default: 2, as in Potree. */
-  minPointSize?: number;
-  /** Upper point size limit in CSS pixels for `attenuated` and `adaptive`. Default: 50, as in Potree. */
-  maxPointSize?: number;
   /**
-   * How points are colored. Its attribute is decoded even when `attributes` omits it.
-   * Default: `'rgb'` when rgb is decoded, otherwise `'elevation'`.
+   * Keep this cloud's octree payloads in its PotreeV2PointCloudSet's encoded cache, so that
+   * evicted nodes are decoded again without another request. Default: true for BROTLI URLs,
+   * false for DEFAULT, whose payloads are as large as the decoded points, and for local files.
    */
-  pointColorType?: PotreeV2PointColorType;
-  /** Gradient of `elevation`. Default: PotreeV2Gradients.SPECTRAL, as in Potree. */
-  gradient?: PotreeV2Gradient;
-  /** metadata.json z range of `elevation`. Default: the bounding box's z range. */
-  elevationRange?: [number, number];
-  /** Intensity range of `intensity`. Default: the metadata's intensity min and max, otherwise 0 to 65535. */
-  intensityRange?: [number, number];
-  /** Class colors and visibility; one scheme can be shared by several clouds. Default: a new one with Potree's colors. */
-  classification?: PotreeV2Classification;
+  cacheEncodedNodes?: boolean;
+  /** Initial `material` settings, named as its properties. */
+  material?: PotreeV2PointMaterialOptions;
   /** Show boxes around currently displayed nodes. Default: false. */
   showBoundingBoxes?: boolean;
   /** Clip boxes and planes; one PotreeV2Clipping can be shared by several clouds. Default: null. */
   clipping?: PotreeV2Clipping | null;
   /**
    * metadata.json attribute names to decode and upload as geometry attributes.
-   * `position` is always decoded. Default: `['position', 'rgb']` (rgb only when present).
+   * `position` and the attribute of `material.colorType` are always decoded. Default: `['position', 'rgb']` (rgb only when present).
    */
   attributes?: string[];
   /**
@@ -266,12 +234,12 @@ let displayStamp = 0;
  */
 export interface CloudSetMembership {
   remove(cloud: PotreeV2PointCloud): boolean;
-  /** Encoded payloads of every member whose own encodedCacheByteBudget is above 0. */
+  /** Encoded payloads of every member that caches encoded nodes. */
   readonly encodedCache: EncodedNodeCache;
 }
 
 /**
- * Clouds that belong to a PotreeV2PointCloudSet, which then owns their updates and budgets.
+ * Clouds that belong to a PotreeV2PointCloudSet, which owns their updates and budgets.
  * @internal
  */
 export const cloudSets = new WeakMap<PotreeV2PointCloud, CloudSetMembership>();
@@ -402,7 +370,10 @@ function releaseBoxResources(resources: BoxResources): void {
   resources.material.dispose();
 }
 
-/** A camera-driven, additive LOD Potree v2 point cloud. Add `group` to a Three.js scene. */
+/**
+ * A camera-driven, additive LOD Potree v2 point cloud. Add `group` to a Three.js scene and the
+ * cloud to a PotreeV2PointCloudSet, whose update() selects and loads its nodes.
+ */
 export class PotreeV2PointCloud {
   readonly group = new Group();
   /** @internal */
@@ -412,11 +383,7 @@ export class PotreeV2PointCloud {
   readonly worldOffset: Vector3;
   readonly material: PotreeV2PointMaterial;
 
-  pointBudget: number;
-  private cachePointBudgetOverride?: number;
   minNodePixelSize: number;
-  maxConcurrentLoads: number;
-  maxNodesToGPUPerFrame: number;
   showBoundingBoxes: boolean;
   /** Clip boxes and planes applied to drawing, picking and node selection from the next update(). */
   clipping: PotreeV2Clipping | null;
@@ -441,15 +408,12 @@ export class PotreeV2PointCloud {
   private readonly decodedQueue: DecodedQueueItem[] = [];
   private readonly controller = new AbortController();
   private decoder: DecoderPool;
-  /** This cloud's encoded cache outside a set; its budget also decides whether it caches in a set. */
-  private readonly ownEncodedCache: EncodedNodeCache;
+  private cachesEncodedNodes: boolean;
   /** Shared bounding box edges, taken when the first box is shown. */
   private boxResources?: BoxResources;
-  readonly decoderWorkers: number;
+  private readonly decoderWorkers: number;
   /** This cloud's network requests in progress; a batch releases its slot once its bytes arrive. */
   private inFlight = 0;
-  /** Request slots when this cloud is updated on its own. */
-  private readonly ownSlots = new LoadSlots();
   /** Batches started by requestBatches that have not finished fetching and decoding. */
   private activeLoads = 0;
   private activeDecodeBatches = 0;
@@ -498,36 +462,29 @@ export class PotreeV2PointCloud {
   private disposed = false;
 
   private constructor(url: URL, metadata: PotreeV2Metadata, options: PotreeV2Options) {
-    this.decodedAttributes = resolveDecodedAttributes(metadata, options.attributes, options.pointColorType);
+    const material = options.material ?? {};
+    this.decodedAttributes = resolveDecodedAttributes(metadata, options.attributes, material.colorType);
     this.metadataUrl = url;
     this.metadata = metadata;
     this.root = createRoot(metadata);
     this.worldOffset = new Vector3(...metadata.boundingBox.min);
     this.fetcher = options.fetch ?? fetch;
-    this.pointBudget = options.pointBudget ?? 2_000_000;
-    this.cachePointBudgetOverride = options.cachePointBudget;
-    this.ownEncodedCache = new EncodedNodeCache(options.encodedCacheByteBudget ??
-      (metadata.encoding === 'BROTLI' ? 128 * 1024 * 1024 : 0));
+    this.cachesEncodedNodes = options.cacheEncodedNodes ?? metadata.encoding === 'BROTLI';
     this.minNodePixelSize = options.minNodePixelSize ?? 30;
-    this.maxConcurrentLoads = Math.max(1, Math.floor(options.maxConcurrentLoads ?? 6));
     this.decoderWorkers = Math.max(1, Math.floor(options.decoderWorkers ?? defaultDecoderWorkers()));
-    this.maxNodesToGPUPerFrame = Math.max(1, Math.floor(options.maxNodesToGPUPerFrame ?? 8));
     this.showBoundingBoxes = options.showBoundingBoxes ?? false;
     this.clipping = options.clipping ?? null;
     this.retryDelayMs = Math.max(0, options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS);
     this.gate = RequestGate.for(url);
     this.onError = options.onError;
     this.material = new PotreeV2PointMaterial({
-      size: options.pointSize ?? 2, shape: options.pointShape ?? 'square',
-      sizeType: options.pointSizeType ?? 'fixed',
-      minSize: options.minPointSize ?? 2, maxSize: options.maxPointSize ?? 50,
+      ...material,
+      colorType: material.colorType ?? (this.decodedAttributes.includes('rgb') ? 'rgb' : 'elevation'),
+      elevationRange: material.elevationRange ?? [metadata.boundingBox.min[2], metadata.boundingBox.max[2]],
+      intensityRange: material.intensityRange ?? defaultIntensityRange(metadata),
+    }, {
       spacing: metadata.spacing, visibleNodes: this.visibleNodes, attributes: this.decodedAttributes,
-      colorType: options.pointColorType ?? (this.decodedAttributes.includes('rgb') ? 'rgb' : 'elevation'),
       sourceOriginZ: metadata.boundingBox.min[2],
-      elevationRange: options.elevationRange ?? [metadata.boundingBox.min[2], metadata.boundingBox.max[2]],
-      intensityRange: options.intensityRange ?? defaultIntensityRange(metadata),
-      gradient: options.gradient ?? PotreeV2Gradients.SPECTRAL,
-      classification: options.classification,
     });
     this.group.name = metadata.name ?? 'Potree v2 point cloud';
     // Last, so that options rejected above, such as an empty gradient, leave no Workers behind.
@@ -542,46 +499,31 @@ export class PotreeV2PointCloud {
    */
   get boundingBox(): Box3 { return this.root.box.clone(); }
 
-  /** Decoded point limit; follows pointBudget unless explicitly overridden. */
-  get cachePointBudget(): number { return this.cachePointBudgetOverride ?? this.pointBudget * 2; }
-  set cachePointBudget(value: number) { this.cachePointBudgetOverride = value; }
-
   /**
-   * Byte limit for encoded octree nodes; setting 0 disables that cache. In a set, a cloud
-   * above 0 caches in the set's cache, whose own limit applies, and 0 drops its entries there.
+   * Whether this cloud keeps octree payloads in its set's encoded cache; see the option of the
+   * same name. Setting false drops its entries there.
    */
-  get encodedCacheByteBudget(): number { return this.ownEncodedCache.maxBytes; }
-  set encodedCacheByteBudget(value: number) {
-    this.ownEncodedCache.maxBytes = value;
-    this.ownEncodedCache.trim();
-    if (value <= 0) cloudSets.get(this)?.encodedCache.deleteOwner(this);
+  get cacheEncodedNodes(): boolean { return this.cachesEncodedNodes; }
+  set cacheEncodedNodes(value: boolean) {
+    this.cachesEncodedNodes = value;
+    if (!value) cloudSets.get(this)?.encodedCache.deleteOwner(this);
   }
 
   /** The cache this cloud reads and stores encoded nodes in, or undefined when it caches none. */
   private get encodedCache(): EncodedNodeCache | undefined {
-    if (this.ownEncodedCache.maxBytes <= 0) return undefined;
-    const cache = cloudSets.get(this)?.encodedCache ?? this.ownEncodedCache;
+    if (!this.cachesEncodedNodes) return undefined;
+    const cache = cloudSets.get(this)?.encodedCache;
     // A set may disable its cache; then no payload is copied for it.
-    return cache.maxBytes > 0 ? cache : undefined;
+    return cache && cache.maxBytes > 0 ? cache : undefined;
   }
 
   /**
    * Traverse at the next update even if the view and budgets are unchanged, as when the cloud
-   * joins or leaves a set: its last selection shared a budget it no longer shares, or the reverse.
+   * joins or leaves a set: its last selection was made under another budget, or none.
    * @internal
    */
   invalidateSelection(): void {
     this.settled = false;
-  }
-
-  /**
-   * Drop this cloud's encoded nodes from its own cache and from `shared`, when it joins or
-   * leaves the set that owns `shared`, so that no cache holds nodes it no longer reads.
-   * @internal
-   */
-  dropEncodedNodes(shared: EncodedNodeCache): void {
-    this.ownEncodedCache.clear();
-    shared.deleteOwner(this);
   }
 
   /** Cumulative successful octree range loads since construction or the last clear. Unstable, see PotreeV2FetchStats. */
@@ -614,16 +556,17 @@ export class PotreeV2PointCloud {
   }
 
   /**
-   * True until an update() finds every node it selected in the scene, with no hierarchy chunk,
-   * range or decode of this cloud pending, and again from the next update() that needs more.
-   * It is decided by update() alone, so it is true before the first one and does not see a
-   * camera move until the next one. A node that keeps failing keeps it true; see onError.
-   * A hidden cloud selects nothing, so it is loaded at once. False once disposed.
+   * True until its set's update() finds every node it selected in the scene, with no hierarchy
+   * chunk, range or decode of this cloud pending, and again from the next update() that needs
+   * more. It is decided by update() alone, so it is true before the first one, including while
+   * the cloud is in no set, and does not see a camera move until the next one. A node that keeps
+   * failing keeps it true; see onError. A hidden cloud selects nothing, so it is loaded at once.
+   * False once disposed.
    */
   get loading(): boolean { return !this.disposed && !this.settled; }
 
   /**
-   * Resolves at the end of the next update() (or the set's update()) after which `loading` is
+   * Resolves at the end of the next update() of its set after which `loading` is
    * false, for screenshots, tests or progress indicators. It waits for an update() even when
    * `loading` is already false, since the view may have changed since the last one. Rejects
    * with the signal's reason when `signal` aborts, and with an AbortError on dispose().
@@ -1012,14 +955,6 @@ export class PotreeV2PointCloud {
     });
   }
 
-  private ownLimits(): UpdateLimits {
-    return {
-      pointBudget: this.pointBudget, cachePointBudget: this.cachePointBudget,
-      maxConcurrentLoads: this.maxConcurrentLoads, maxNodesToGPUPerFrame: this.maxNodesToGPUPerFrame,
-      slots: this.ownSlots,
-    };
-  }
-
   /**
    * Start the most important batches of all clouds while request slots are free.
    * Network and decoding overlap: a batch frees its request slot once its bytes
@@ -1123,22 +1058,6 @@ export class PotreeV2PointCloud {
       this.activeLoads--;
     });
     for (const state of states) state.loading = promise;
-  }
-
-  /**
-   * Recompute visible nodes and start background loads. Call once per render frame.
-   * Returns true when nodes, clipping or layers changed and should be rendered again.
-   * After changing materials (size, color, classification, etc.), request a render in the application.
-   * When the view, viewport and settings are unchanged and all loads have settled, the traversal is skipped.
-   * Node objects take the layers of `group`.
-   * While `group` or an ancestor is hidden, nothing is selected or loaded.
-   * A cloud added to a PotreeV2PointCloudSet is updated through the set instead.
-   */
-  update(camera: Camera, viewportHeight: number): boolean {
-    if (cloudSets.has(this)) {
-      throw new Error('This point cloud belongs to a PotreeV2PointCloudSet; call the set\'s update() instead');
-    }
-    return updatePointClouds([this], camera, viewportHeight, this.ownLimits(), false);
   }
 
   static {
@@ -1564,7 +1483,6 @@ export class PotreeV2PointCloud {
     this.lodNodes.clear();
     this.states.clear();
     this.decodedQueue.length = 0;
-    this.ownEncodedCache.clear();
     if (this.picker) {
       this.picker.forget(this.material);
       this.picker.release();

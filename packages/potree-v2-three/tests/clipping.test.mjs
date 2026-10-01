@@ -235,14 +235,21 @@ async function loadFixture(options = {}) {
   return { cloud, camera };
 }
 
+/** Display `cloud` through a set of its own, as an application with one cloud does. */
+function display(cloud) {
+  const set = new PotreeV2PointCloudSet();
+  set.add(cloud);
+  return set;
+}
+
 function shownNodes(cloud) {
   return cloud.group.children.filter(child => child.isPoints && child.visible).map(child => child.name).sort();
 }
 
-async function settle(cloud, camera) {
+async function settle(set, camera) {
   await waitFor(() => {
-    cloud.update(camera, 600);
-    return cloud.settled;
+    set.update(camera, 600);
+    return set.clouds.every(cloud => cloud.settled);
   });
 }
 
@@ -250,22 +257,23 @@ test('a pruning hide box keeps its nodes out of the selection and the network', 
   const clipping = new PotreeV2Clipping();
   const box = clipping.addBox({ matrix: boxMatrix([2, 2, 2], [4.2, 4.2, 4.2]), mode: 'hide-inside' });
   const { cloud, camera } = await loadFixture({ clipping });
+  const set = display(cloud);
   try {
-    await settle(cloud, camera);
+    await settle(set, camera);
     assert.deepEqual(shownNodes(cloud), ['r', 'r1', 'r2']);
     assert.deepEqual(cloud.fetchStats, { rangeRequests: 2, fetchedNodes: 3 });
-    assert.equal(cloud.update(camera, 600), false);
+    assert.equal(set.update(camera, 600), false);
 
     // Not pruning: the node loads and stays budgeted, but is not drawn.
     box.prune = false;
-    await settle(cloud, camera);
+    await settle(set, camera);
     assert.equal(cloud.fetchStats.fetchedNodes, 4);
     assert.deepEqual(shownNodes(cloud), ['r', 'r1', 'r2']);
     assert.equal(cloud.group.children.filter(child => child.isPoints).length, 4);
 
     // Disabling the box is noticed without any notification from the application.
     box.enabled = false;
-    assert.equal(cloud.update(camera, 600), true);
+    assert.equal(set.update(camera, 600), true);
     assert.deepEqual(shownNodes(cloud), ['r', 'r0', 'r1', 'r2']);
   } finally {
     cloud.dispose();
@@ -275,10 +283,11 @@ test('a pruning hide box keeps its nodes out of the selection and the network', 
 test('keep boxes and planes select only nodes that can show points, and compile the clip test', async () => {
   const clipping = new PotreeV2Clipping();
   const { cloud, camera } = await loadFixture({ clipping });
+  const set = display(cloud);
   try {
     assert.equal(cloud.material.defines.POTREE_CLIP_BOXES, 0);
     const keep = clipping.addBox({ matrix: boxMatrix([2, 2, 6], [2, 2, 2]), mode: 'keep-inside' });
-    await settle(cloud, camera);
+    await settle(set, camera);
     assert.deepEqual(shownNodes(cloud), ['r', 'r1']);
     assert.equal(cloud.material.defines.POTREE_CLIP_BOXES, 16);
     assert.equal(cloud.material.defines.POTREE_CLIP_PLANES, 8);
@@ -301,7 +310,7 @@ test('keep boxes and planes select only nodes that can show points, and compile 
     clipping.remove(keep);
     // Keeps y <= 3.9, so r2 (y 4..8) is pruned.
     clipping.addPlane({ plane: new Plane(new Vector3(0, -1, 0), 3.9) });
-    await settle(cloud, camera);
+    await settle(set, camera);
     assert.deepEqual(shownNodes(cloud), ['r', 'r0', 'r1']);
     root.onBeforeRender();
     assert.equal(clip.uniforms.potreeClipPlaneCount.value, 1);
@@ -310,7 +319,7 @@ test('keep boxes and planes select only nodes that can show points, and compile 
 
     // The clip applies in world space: moving the cloud moves its nodes relative to the plane.
     cloud.group.position.y = -4;
-    await settle(cloud, camera);
+    await settle(set, camera);
     assert.deepEqual(shownNodes(cloud), ['r', 'r0', 'r1', 'r2']);
   } finally {
     cloud.dispose();
@@ -326,16 +335,17 @@ test('clouds sharing a clipping pick up its changes and grow the shader capacity
     for (let i = 0; i < 17; i++) {
       clipping.addBox({ matrix: boxMatrix([7.9, 7.9, 0.1 + i * 0.1], [0.05, 0.05, 0.05]), mode: 'hide-inside' });
     }
-    await settle(a.cloud, a.camera);
-    await settle(b.cloud, b.camera);
+    const set = display(a.cloud);
+    set.add(b.cloud);
+    await settle(set, a.camera);
     for (const { cloud } of [a, b]) {
       assert.equal(cloud.material.defines.POTREE_CLIP_BOXES, 32);
       assert.equal(cloud.material.clip.uniforms.potreeClipBoxes.value.length, 32 * 12);
     }
     clipping.clear();
     // No node changes visibility, but the shader no longer clips, so the scene must be drawn again.
-    assert.equal(a.cloud.update(a.camera, 600), true);
-    await settle(a.cloud, a.camera);
+    assert.equal(set.update(a.camera, 600), true);
+    await settle(set, a.camera);
     // The capacity never shrinks, so clearing clips does not recompile.
     assert.equal(a.cloud.material.defines.POTREE_CLIP_BOXES, 32);
   } finally {

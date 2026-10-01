@@ -109,7 +109,7 @@ test('hidden classes are neither drawn nor picked', async ({ page }) => {
 })
 
 test('each class is drawn in its own color', async ({ page }) => {
-  await load(page, CLASSES, { pointColorType: 'classification' })
+  await load(page, CLASSES, { material: { colorType: 'classification' } })
   const counts = await palette(page)
   expect(sorted(Object.keys(counts))).toEqual(sorted(CLASS_BANDS.map(code => CLASS_COLORS[code]!)))
   // The outer bands cover less of the pump, so only require that each is clearly drawn.
@@ -119,7 +119,7 @@ test('each class is drawn in its own color', async ({ page }) => {
 })
 
 test('hiding or recoloring one class changes only that class', async ({ page }) => {
-  await load(page, CLASSES, { pointColorType: 'classification' })
+  await load(page, CLASSES, { material: { colorType: 'classification' } })
   const all = CLASS_BANDS.map(code => CLASS_COLORS[code]!)
 
   await setClassVisible(page, 6, false)
@@ -152,7 +152,7 @@ test('only position and rgb are decoded by default', async ({ page }) => {
   const loaded = await load(page, BROTLI)
   expect(loaded.attributes).toEqual(['position', 'rgb'])
   await expect(setColor(page, { type: 'intensity' })).rejects.toThrow(/needs the decoded attribute 'intensity'/)
-  const colored = await load(page, BROTLI, { pointColorType: 'classification' })
+  const colored = await load(page, BROTLI, { material: { colorType: 'classification' } })
   expect(colored.attributes).toEqual(['position', 'rgb', 'classification'])
 })
 

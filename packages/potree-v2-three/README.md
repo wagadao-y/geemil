@@ -7,29 +7,33 @@ PotreeConverter **2.0** の `metadata.json`, `hierarchy.bin`, `octree.bin` を T
 ## 使い方
 
 ```ts
-import { loadPotreeV2 } from '@geemil/potree-v2-three';
+import { loadPotreeV2, PotreeV2PointCloudSet } from '@geemil/potree-v2-three';
 
+const clouds = new PotreeV2PointCloudSet({ pointBudget: 2_000_000 });
 const cloud = await loadPotreeV2('/pointcloud/metadata.json', {
-  pointBudget: 2_000_000,
+  material: { size: 3 },
   onError: (error, node) => console.error(node, error),
 });
+clouds.add(cloud);
 scene.add(cloud.group);
 
 function render() {
   requestAnimationFrame(render);
-  cloud.update(camera, renderer.domElement.clientHeight);
+  clouds.update(camera, renderer.domElement.clientHeight);
   renderer.render(scene, camera);
 }
 render();
 
-// When the cloud is no longer needed:
+// When the cloud is no longer needed (dispose() also removes it from the set):
 scene.remove(cloud.group);
 cloud.dispose();
 ```
 
+点群の表示は、点群が 1 つでも `PotreeV2PointCloudSet` を通して行います。点数予算・キャッシュの上限・同時リクエスト数・1 フレームに描画へ追加するノード数はセットだけが持ち、セットに入れた全点群で共有します（本家 Potree の `Potree.pointBudget` と同じ考え方です）。点群が持つのは、`minNodePixelSize`、`showBoundingBoxes`、`clipping`、`material` など、その点群だけに効く設定です。セットに入っていない点群は、ノードを選ぶことも読み込むこともありません。
+
 `cloud.group` は座標を点群の bounding box の最小値で平行移動したローカル座標で表示します。元の座標は `cloud.worldOffset` にあります。`cloud.boundingBox` は、このローカル座標での点群の範囲（原点から metadata の bounding box の大きさまで）を返します。大きな地理座標をそのまま `group.position` に設定すると GPU の精度が落ちるため、アプリ側で扱いを決めてください。
 
-`cloud.update()` はカメラと表示領域の高さから必要な階層を選び、近接するノードをまとめて HTTP Range で非同期に読み込みます。戻り値は、ノードの追加・表示切り替え・破棄でシーンが変わったときと、`cloud.group.layers` を変更したときに `true` になります。カメラ・点群の行列、表示領域の高さ、`pointBudget`、`cachePointBudget`、`minNodePixelSize`、`showBoundingBoxes` が前回と同じで、選ばれたノードがすべてシーンに追加され、読み込み中の処理がない間は、階層の走査を省略して `false` を返します。静止中は、戻り値とカメラ操作を見て描画を省略できます。マテリアルの変更は戻り値に反映されないため、色・サイズ・形・分類の色や表示状態などを変更した場合は、アプリ側で `needsRender = true` にして再描画を要求してください。EDL の設定など、描画に関わるそのほかの設定を変更した場合も同様です。
+`clouds.update()` はカメラと表示領域の高さから、セットの各点群で必要な階層を選び、近接するノードをまとめて HTTP Range で非同期に読み込みます。戻り値は、どれかの点群でノードの追加・表示切り替え・破棄によりシーンが変わったときと、`cloud.group.layers` を変更したときに `true` になります。カメラ・点群の行列、表示領域の高さ、セットの `pointBudget`、`cachePointBudget`、点群の `minNodePixelSize`、`showBoundingBoxes` が前回と同じで、選ばれたノードがすべてシーンに追加され、読み込み中の処理がない間は、階層の走査を省略して `false` を返します。静止中は、戻り値とカメラ操作を見て描画を省略できます。マテリアルの変更は戻り値に反映されないため、色・サイズ・形・分類の色や表示状態などを変更した場合は、アプリ側で `needsRender = true` にして再描画を要求してください。EDL の設定など、描画に関わるそのほかの設定を変更した場合も同様です。
 
 ノードの `Points` とバウンディングボックスは、`cloud.group.layers` を引き継ぎます。後から読み込まれたノードも同じ layers で作られ、`group.layers` を変更すると次の `update()` で既存のノードにも反映します。カメラの `layers` で点群を描き分ける場合は、子ではなく `cloud.group.layers` を設定してください。
 
@@ -38,7 +42,7 @@ let needsRender = true;
 function render() {
   requestAnimationFrame(render);
   if (controls.update()) needsRender = true;
-  if (cloud.update(camera, renderer.domElement.clientHeight)) needsRender = true;
+  if (clouds.update(camera, renderer.domElement.clientHeight)) needsRender = true;
   if (needsRender) {
     needsRender = false;
     renderer.render(scene, camera);
@@ -46,24 +50,24 @@ function render() {
 }
 ```
 
-読み込みが落ち着いたかは `cloud.loading` で分かります。`update()` が選んだノードがすべてシーンに追加され、この点群の階層チャンク・Range 取得・デコードが残っていなければ `false` になり、視点が変わって新しいノードが必要になった `update()` から再び `true` になります。判定するのは `update()` だけなので、最初の `update()` の前は `true` です。カメラを動かしても、次の `update()` までは値が変わりません。失敗を繰り返すノードがある間は `true` のままです（`onError` を参照してください）。非表示の点群はノードを選ばないので、すぐに `false` になります。`dispose()` した点群は `false` です。
+読み込みが落ち着いたかは `cloud.loading` で分かります。セットの `update()` が選んだノードがすべてシーンに追加され、この点群の階層チャンク・Range 取得・デコードが残っていなければ `false` になり、視点が変わって新しいノードが必要になった `update()` から再び `true` になります。判定するのは `update()` だけなので、最初の `update()` の前（セットに入れる前も含みます）は `true` です。カメラを動かしても、次の `update()` までは値が変わりません。失敗を繰り返すノードがある間は `true` のままです（`onError` を参照してください）。非表示の点群はノードを選ばないので、すぐに `false` になります。`dispose()` した点群は `false` です。
 
 `cloud.whenLoaded()` は、`loading` が `false` になった `update()` の終わりで解決する Promise を返します。スクリーンショット、テスト、読み込み中の表示に使えます。前回の `update()` 以降に視点が変わっているかもしれないので、すでに `false` でも次の `update()` を待ちます。そのため、描画ループで `update()` を呼び続けてください。`{ signal }` を渡すと、中断したときにその reason で reject します。点群を `dispose()` すると `AbortError` で reject します。`PotreeV2PointCloudSet` にも同じ `loading` と `whenLoaded()` があり、セットのどの点群も `loading` でなくなった `update()` で解決します。
 
 ```ts
-await cloud.whenLoaded(); // the render loop keeps calling cloud.update()
+await cloud.whenLoaded(); // the render loop keeps calling clouds.update()
 const image = renderer.domElement.toDataURL();
 ```
 
 `cloud.group` かその祖先の `visible` が `false` の間、`update()` はノードを選ばず、取得も点数予算の消費もしません（本家 Potree と同じです）。表示していたノードは非表示になり、復号済みキャッシュでは最近表示していないノードとして、ほかのノードより先に破棄されます。`visible` を戻すと、カメラが止まっていても次の `update()` で読み込みを再開します。
 
-同時に行う HTTP リクエスト（階層チャンクと octree の取得）は `maxConcurrentLoads`（初期値 6）、デコード用の Worker 数は `decoderWorkers`（初期値は論理コア数 - 1、1〜4）で指定します。Worker は全点群で 1 つのプールを共有し、生きている点群が指定した最大の数まで増えます。最後の点群を `dispose()` すると終了します。Worker が異常終了したり、Worker のスクリプトを読み込めなかったりした場合は、そのプールでのデコードがすべて失敗し、`onError` に渡されます。次の再試行からは、どの点群も新しいプールでデコードします。取得を終えたバッチはすぐにリクエストの枠を空けるので、Worker がデコードしている間も次のノードを取得できます。デコード待ち・デコード中のバッチが共有プール全体で Worker 数の 2 倍に達している間は、`loadPotreeV2()` でのルートノードの読み込みも含め、新しい取得を始めません。取得中のバッチはこの数に含めず `maxConcurrentLoads` で制限するので、Worker が少ない環境でもリクエストの枠をすべて使い、通信の待ち時間をデコードと重ねられます。取得が一度に終わった場合、Worker を待つバッチは最大で Worker 数の 2 倍と取得中だったバッチ数の合計になります。復号前キャッシュから再デコードするノードは、取得するノードとは別にまとめ、リクエストの枠を使わずにこの上限だけを守ります。サーバーは 3 ファイルにアクセス可能で、Range リクエストと CORS（別オリジンの場合）に対応させてください。`hierarchy.bin` と `octree.bin` の取得は HTTP 206 を受け付けます。ファイルの先頭からの範囲に 200 でファイル全体が返った場合は、ファイルの長さが要求した範囲とちょうど同じときだけ受け付けます（小さなデータで最初の階層チャンクがファイル全体になる場合など）。それ以外で Range を無視して 200 を返すサーバーはエラーになり、要求したバイト数を超えた時点で受信を打ち切ります。レスポンスの長さは `Content-Length` に頼らず、ボディを読みながら要求したバイト数と一致するかを確かめるので、chunked 転送や圧縮されたレスポンスでも要求サイズを超えて読み込みません。別オリジンで `Content-Range` を検証させたい場合は、`Access-Control-Expose-Headers: Content-Range` で公開してください（公開されていなければ検証を省略します）。
+同時に行う HTTP リクエスト（階層チャンクと octree の取得）はセットの `maxConcurrentLoads`（初期値 6）、デコード用の Worker 数は点群のオプション `decoderWorkers`（初期値は論理コア数 - 1、1〜4）で指定します。`decoderWorkers` はルートノードの読み込みにも使うので、セットではなく読み込み時に指定します。Worker はセットに関係なく全点群で 1 つのプールを共有し、生きている点群が指定した最大の数まで増えます。最後の点群を `dispose()` すると終了します。Worker が異常終了したり、Worker のスクリプトを読み込めなかったりした場合は、そのプールでのデコードがすべて失敗し、`onError` に渡されます。次の再試行からは、どの点群も新しいプールでデコードします。取得を終えたバッチはすぐにリクエストの枠を空けるので、Worker がデコードしている間も次のノードを取得できます。デコード待ち・デコード中のバッチが共有プール全体で Worker 数の 2 倍に達している間は、`loadPotreeV2()` でのルートノードの読み込みも含め、新しい取得を始めません。取得中のバッチはこの数に含めず `maxConcurrentLoads` で制限するので、Worker が少ない環境でもリクエストの枠をすべて使い、通信の待ち時間をデコードと重ねられます。取得が一度に終わった場合、Worker を待つバッチは最大で Worker 数の 2 倍と取得中だったバッチ数の合計になります。復号前キャッシュから再デコードするノードは、取得するノードとは別にまとめ、リクエストの枠を使わずにこの上限だけを守ります。サーバーは 3 ファイルにアクセス可能で、Range リクエストと CORS（別オリジンの場合）に対応させてください。`hierarchy.bin` と `octree.bin` の取得は HTTP 206 を受け付けます。ファイルの先頭からの範囲に 200 でファイル全体が返った場合は、ファイルの長さが要求した範囲とちょうど同じときだけ受け付けます（小さなデータで最初の階層チャンクがファイル全体になる場合など）。それ以外で Range を無視して 200 を返すサーバーはエラーになり、要求したバイト数を超えた時点で受信を打ち切ります。レスポンスの長さは `Content-Length` に頼らず、ボディを読みながら要求したバイト数と一致するかを確かめるので、chunked 転送や圧縮されたレスポンスでも要求サイズを超えて読み込みません。別オリジンで `Content-Range` を検証させたい場合は、`Access-Control-Expose-Headers: Content-Range` で公開してください（公開されていなければ検証を省略します）。
 
-ノードは画面上の投影半径が大きい順に選び、`pointBudget` に収まらないノードに当たった時点で選択を終えます（公式 Potree と同じです）。ルートもこの上限に含まれ、`pointBudget = 0` やルートの点数未満の予算では点を表示しません。視錐台の外にある子ノードは候補に加えません。取得中のバッチに含まれるノードがどれも 300 ms 以上選ばれなかった場合は、視点が移ったものとしてそのリクエストを中断します（`loadDiagnostics.abortedRequests`）。中断したノードは、再び選ばれたときに取得し直します。
+ノードはセットの全点群をまとめて画面上の投影半径が大きい順に選び、`pointBudget`（初期値 2,000,000）に収まらないノードに当たった時点で選択を終えます（公式 Potree と同じです）。取得と描画への追加もその順に行うので、これらの上限は点群の数に関係なく一定です。ルートもこの上限に含まれ、`pointBudget = 0` やルートの点数未満の予算では点を表示しません。視錐台の外にある子ノードは候補に加えません。取得中のバッチに含まれるノードがどれも 300 ms 以上選ばれなかった場合は、視点が移ったものとしてそのリクエストを中断します（`loadDiagnostics.abortedRequests`）。中断したノードは、再び選ばれたときに取得し直します。
 
 子ノードは画面上の投影半径が `minNodePixelSize` 以上の場合に探索します。既定値は公式 Potree Viewer と同じ 30 px です。値を変えると次の `update()` から反映されます。
 
-復号後に描画へ追加するノード数は `maxNodesToGPUPerFrame` で制御できます（初期値 8）。`cloud.maxNodesToGPUPerFrame` を変更すると次の `update()` から反映されます。
+復号後に描画へ追加するノード数は、セットの `maxNodesToGPUPerFrame` で制御できます（初期値 8）。描画への追加を待つ復号済みノードの数も、セット全体で上限を守ります。セットの設定はどれもプロパティとして変更でき、次の `update()` から反映されます。
 
 ノードや階層チャンクの読み込みに失敗すると `onError` が呼ばれ、`retryDelayMs`（初期値 1000）後の `update()` で再試行されます。待ち時間は失敗のたびに倍になり、最大 30 秒です。読み込みに成功すると元に戻ります。
 
@@ -80,7 +84,9 @@ controller.abort();
 
 HTTP のエラーは `HttpError`（`status` と `retryAfterMs` を持ちます）として `onError` に渡されるので、404 などの内容に応じて処理を分けられます。
 
-キャッシュは二段階です。復号済みジオメトリは、表示中の `pointBudget` の2倍の点数まで保持し、超過時に非表示ノードを古い順に破棄します。この上限は `pointBudget` の変更に追従し、`cachePointBudget` で固定値に上書きできます。BROTLI の URL データは、復号前のノードも LRU で最大 128 MiB 保持します。上限は `encodedCacheByteBudget`（バイト数）で変更でき、`0` で無効になります。無圧縮（`DEFAULT`）のデータとローカルファイルは初期状態では復号前のキャッシュを使いません。`PotreeV2PointCloudSet` に入れた点群は、自分の `encodedCacheByteBudget` が 0 より大きければセットの復号前キャッシュを使います（下記）。復号前のキャッシュに残っているノードは再取得せず、Worker で再デコードします。
+キャッシュは二段階で、どちらもセットが持ちます。復号済みジオメトリは、セットの `pointBudget` の2倍の点数まで保持し、超過時に全点群の中で最近表示していないノードから破棄します。この上限は `pointBudget` の変更に追従し、`cachePointBudget` で固定値に上書きできます。復号前のノードは、LRU で最大 128 MiB 保持します。上限はセットの `encodedCacheByteBudget`（バイト数）で変更でき、`0` で無効になります。復号前のキャッシュに残っているノードは再取得せず、Worker で再デコードします。
+
+復号前のキャッシュを使うかは点群ごとに `cacheEncodedNodes` で決めます。初期値は BROTLI の URL データでは `true` です。無圧縮（`DEFAULT`）のデータは復号前でも復号後と同じくらいの大きさになり、ローカルファイルは読み直しが安いので、どちらも初期値は `false` です。`cloud.cacheEncodedNodes = false` にすると、セットのキャッシュにあるその点群のノードを破棄します。`loadPotreeV2()` で読み込むルートノードは、セットに入れる前に読むのでキャッシュしません。
 
 `cloud.fetchStats` と `cloud.loadDiagnostics` は、playground の統計表示のような計測・デバッグ用の API です。項目はリリースごとに変わることがあり、互換性は保証しません。
 
@@ -92,7 +98,7 @@ BROTLI は google/brotli 1.2.0 の decode-only WASM で復号します。Worker 
 
 `showBoundingBoxes: true` を指定すると表示中のノードの bbox を描画します。`cloud.showBoundingBoxes` の変更も次の `update()` から反映されます（初期値は `false`）。
 
-複数の点群を表示するときは `PotreeV2PointCloudSet` で点数予算・復号済みキャッシュ・復号前キャッシュ・同時リクエスト数・1 フレームの追加ノード数を共有できます。全点群をまとめて投影サイズの大きいノードから選び、取得と描画への追加もその順に行うので、これらの上限は点群の数に関係なく一定です。描画への追加を待つ復号済みノードの数も、セット全体で上限を守ります。キャッシュも全点群で最近表示していないノードから解放します（本家 Potree の `Potree.pointBudget` と同じ考え方です）。オプションは `pointBudget`、`cachePointBudget`、`maxConcurrentLoads`、`maxNodesToGPUPerFrame`、`encodedCacheByteBudget` で、初期値は点群単体と同じです（`encodedCacheByteBudget` は 128 MiB）。セットに入れた点群の同名の設定は使われず、`cloud.update()` を呼ぶとエラーになります。ただし点群の `encodedCacheByteBudget` が 0 の点群（`DEFAULT` とローカルファイルの初期状態）は、セットの復号前キャッシュも使いません。点群をセットに入れると、それまで点群単体で持っていた復号前キャッシュは破棄され、セットから外すとセットのキャッシュにあるその点群のノードが破棄されます。`minNodePixelSize` や `showBoundingBoxes` は点群ごとの設定がそのまま効きます。
+複数の点群は同じセットに入れます。
 
 ```ts
 const clouds = new PotreeV2PointCloudSet({ pointBudget: 3_000_000 });
@@ -104,7 +110,7 @@ for (const cloud of [a, b]) {
 if (clouds.update(camera, canvas.clientHeight)) renderer.render(scene, camera);
 ```
 
-`clouds.remove(cloud)` で外すと、その点群は再び自分の予算で `cloud.update()` できます。`cloud.dispose()` するとセットからも外れます。
+点群は同時に 1 つのセットにしか入れられません。`clouds.remove(cloud)` で外すと、その点群のノードは外した時点の表示のまま更新されなくなり、セットの復号前キャッシュからその点群のノードを破棄します。別のセットに入れると、そのセットの予算で選び直します。`cloud.dispose()` するとセットからも外れます。
 
 `clouds.pick(renderer, camera, x, y)` は、セットの全点群を同じ深度バッファに描いてピックするので、手前にある別の点群の点に隠れた点には当たりません。結果の `cloud` で、どの点群の点かが分かります。`cloud.pick()` はその点群だけを描くので、ほかの点群に隠れている点にも当たります。
 
@@ -142,7 +148,7 @@ const cloud = await loadPotreeV2FromFiles(input.files!);
 scene.add(cloud.group);
 ```
 
-初期状態では `position` と `rgb`（metadata にある場合）だけを復号し、GPU に送ります。強度や分類で色を付ける場合や、ほかの属性を独自のマテリアルなどで使う場合は、`attributes` オプションで復号する属性名を指定します。この指定は初期値を置き換えるので、色も必要なら `rgb` を含めてください。`position` と、`pointColorType` で指定した色の種類が使う属性は常に復号します。metadata にない名前を指定すると読み込みはエラーになります。
+初期状態では `position` と `rgb`（metadata にある場合）だけを復号し、GPU に送ります。強度や分類で色を付ける場合や、ほかの属性を独自のマテリアルなどで使う場合は、`attributes` オプションで復号する属性名を指定します。この指定は初期値を置き換えるので、色も必要なら `rgb` を含めてください。`position` と、`material.colorType` で指定した色の種類が使う属性は常に復号します。metadata にない名前を指定すると読み込みはエラーになります。
 
 ```ts
 const cloud = await loadPotreeV2('/pointcloud/metadata.json', {
@@ -197,9 +203,9 @@ clipping.remove(cut);
 
 1 ノードで判定できるクリップの数はシェーダーの定数です。最初にクリップが必要になった時点でボックス 16 個・平面 8 枚としてコンパイルし、足りなくなったノードが現れたら倍に増やしてコンパイルし直します。コンパイルし直しても、読み込み済みのノードやキャッシュはそのまま使えます。上限は減らしません。ボックスは 1 個あたり頂点 uniform を 3 vec4 使うので、WebGL2 が保証する 256 vec4 の範囲では 1 ノードあたり 60 個程度が目安です。
 
-`cloud.material` は `ShaderMaterial` を継承した `PotreeV2PointMaterial` です。`material.size`（CSS px）で点のサイズを変えられます。`material.shape` は点の形で、`'square'`（既定）と `'circle'` があり、オプションの `pointShape` でも指定できます。`'circle'` では四隅を描かないので、ピックもその部分には当たりません。形を変えるとシェーダーをコンパイルし直しますが、読み込み済みのノードはそのまま使えます。
+`cloud.material` は `ShaderMaterial` を継承した `PotreeV2PointMaterial` です。`material.size`（CSS px）で点のサイズを変えられます。読み込み時の値は `material` オプションに、プロパティと同じ名前で指定します（`loadPotreeV2(url, { material: { size: 3, shape: 'circle', colorType: 'elevation' } })`）。指定できるのは `size`、`shape`、`sizeType`、`minSize`、`maxSize`、`colorType`、`color`、`gradient`、`elevationRange`、`intensityRange`、`intensityGamma`、`classification` です。`material.shape` は点の形で、`'square'`（既定）と `'circle'` があります。`'circle'` では四隅を描かないので、ピックもその部分には当たりません。形を変えるとシェーダーをコンパイルし直しますが、読み込み済みのノードはそのまま使えます。
 
-`material.sizeType`（オプションは `pointSizeType`）で、`size` から画面上の大きさを決める方法を選べます。
+`material.sizeType` で、`size` から画面上の大きさを決める方法を選べます。
 
 | `sizeType` | `size` の意味 | 画面上の大きさ |
 |---|---|---|
@@ -207,13 +213,13 @@ clipping.remove(cut);
 | `'attenuated'` | ルートの spacing に掛ける倍率 | ワールド空間で一定の大きさ。近いほど大きい |
 | `'adaptive'` | その位置で表示中の最も深いノードの spacing × 1.7 に掛ける倍率 | 細かいノードが表示されている所ほど小さく、粗い所ほど大きい |
 
-`'attenuated'` と `'adaptive'` では、大きさを `material.minSize`〜`material.maxSize`（CSS px、既定は Potree と同じ 2〜50、オプションは `minPointSize`・`maxPointSize`）に収めます。`size` は 1 前後が目安です。
+`'attenuated'` と `'adaptive'` では、大きさを `material.minSize`〜`material.maxSize`（CSS px、既定は Potree と同じ 2〜50）に収めます。`size` は 1 前後が目安です。
 
 `'adaptive'` は Potree と同じく、表示中のノードの木を整数テクスチャに書き込み、頂点シェーダーが点の位置から子ノードをたどって最も深い表示ノードのレベルを求めます。加算型の LOD でも、親ノードの点は子ノードが表示されている領域では子ノードの点と同じ大きさになり、粗い点が細かい点を覆いません。オクツリーは点が少なくなった所で分割を止めるので、スキャンデータでは浅いレベルの葉ノードも周囲の深いノードと同じくらい密なことがよくあります。レベルだけで大きさを決めるとそうした葉ノードの点が数倍大きくなるため、Potree の lodOffset と同じく、ノードをデコードするときに Worker で 32³ の格子の 1 セルあたりの点数を数えて実際の点間隔を推定し、レベルを補正します（本家 Potree と同じく、メインスレッドでは点を走査しません）。補正量は PotreeConverter 2 のデータで Potree と一致するので、同じ `size` なら Potree と同じ大きさになります。テクスチャは表示ノードが変わった `update()` でだけ作り直します。ピックも同じ計算で描画するので、見た目どおりの範囲に当たります。
 
 ## 点の色
 
-`material.colorType`（オプションは `pointColorType`）で、点の色の付け方を選べます。既定は `rgb` を復号していれば `'rgb'`、なければ `'elevation'` です。変えるとシェーダーをコンパイルし直しますが、読み込み済みのノードはそのまま使えます。
+`material.colorType` で、点の色の付け方を選べます。既定は `rgb` を復号していれば `'rgb'`、なければ `'elevation'` です。変えるとシェーダーをコンパイルし直しますが、読み込み済みのノードはそのまま使えます。
 
 | `colorType` | 使う属性 | 色 |
 |---|---|---|
@@ -223,7 +229,7 @@ clipping.remove(cut);
 | `'intensity'` | `intensity` | `material.intensityRange` を黒〜白に対応させ、`material.intensityGamma` 乗した灰色 |
 | `'classification'` | `classification` | `material.classification` に登録したクラスごとの色 |
 
-復号する属性は読み込み時に決まり、使う属性を復号していない色の種類を指定するとエラーになります。`pointColorType` で指定した色の種類が使う属性は自動で復号しますが、読み込み後に `'intensity'` や `'classification'` へ切り替えるなら、`attributes` オプションにその属性を含めてください。
+復号する属性は読み込み時に決まり、使う属性を復号していない色の種類を指定するとエラーになります。読み込み時に `material.colorType` で指定した色の種類が使う属性は自動で復号しますが、読み込み後に `'intensity'` や `'classification'` へ切り替えるなら、`attributes` オプションにその属性を含めてください。
 
 ```ts
 import { PotreeV2Classification, PotreeV2Gradients } from '@geemil/potree-v2-three';
@@ -247,11 +253,11 @@ cloud.material.color.set('#ffcc00');
 
 ### 分類
 
-`PotreeV2Classification` はクラス番号（0〜255）ごとの色と表示・非表示を持ちます。初期値は Potree と同じ ASPRS LAS の配色です（地面は茶、植生は緑、建物は橙、ノイズは紫、水面は青など。一覧にない番号は青緑）。配色は `PotreeV2DefaultClassColors`、一覧にない番号の色は `PotreeV2UnlistedClassColor` で参照できます。点群ごとに 1 つずつ作られますが、オプションの `classification` や `material.classification` に同じものを渡せば複数の点群で共有できます。
+`PotreeV2Classification` はクラス番号（0〜255）ごとの色と表示・非表示を持ちます。初期値は Potree と同じ ASPRS LAS の配色です（地面は茶、植生は緑、建物は橙、ノイズは紫、水面は青など。一覧にない番号は青緑）。配色は `PotreeV2DefaultClassColors`、一覧にない番号の色は `PotreeV2UnlistedClassColor` で参照できます。点群ごとに 1 つずつ作られますが、オプションの `material.classification` や読み込み後の `material.classification` に同じものを渡せば複数の点群で共有できます。共有するために作ったものは、マテリアルと一緒には破棄されないので、使い終わったらアプリ側で `dispose()` してください。
 
 ```ts
 const classification = new PotreeV2Classification({ 6: { color: '#ff4040' } });
-const cloud = await loadPotreeV2(url, { classification });
+const cloud = await loadPotreeV2(url, { material: { classification } });
 
 classification.setVisible(7, false); // ノイズを隠す
 classification.setColor(2, 'saddlebrown');
@@ -270,8 +276,8 @@ import { PotreeV2EDL } from '@geemil/potree-v2-three';
 const edl = new PotreeV2EDL({ strength: 0.4, radius: 1.4 }); // 既定値は Potree と同じ
 
 function animate() {
-  cloud.update(camera, viewport.clientHeight);
-  edl.render(renderer, scene, camera, [cloud]);
+  clouds.update(camera, viewport.clientHeight);
+  edl.render(renderer, scene, camera, clouds.clouds);
 }
 ```
 

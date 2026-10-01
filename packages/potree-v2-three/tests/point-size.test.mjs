@@ -7,7 +7,6 @@ import {
 } from '../dist/point-size.js';
 import { PotreeV2PointMaterial } from '../dist/material.js';
 import { NO_CLIP } from '../dist/clipping.js';
-import { PotreeV2Gradients } from '../dist/point-color.js';
 
 function node(name, box) {
   return { name, level: name.length - 1, box, children: [] };
@@ -166,10 +165,8 @@ test('only the adaptive size type uploads uniforms for each node', () => {
   const visibleNodes = new VisibleNodesTexture();
   visibleNodes.update([root, child], () => 0);
   const material = new PotreeV2PointMaterial({
-    size: 1, shape: 'square', sizeType: 'fixed', minSize: 2, maxSize: 50, spacing: 1, visibleNodes,
-    attributes: ['position', 'rgb'], colorType: 'rgb', sourceOriginZ: 0, elevationRange: [0, 8],
-    intensityRange: [0, 65535], gradient: PotreeV2Gradients.SPECTRAL,
-  });
+    size: 1, colorType: 'rgb', elevationRange: [0, 8], intensityRange: [0, 65535],
+  }, { spacing: 1, visibleNodes, attributes: ['position', 'rgb'], sourceOriginZ: 0 });
   const draw = target => {
     material.uniformsNeedUpdate = false;
     material.setNode(target, NO_CLIP, target.box.min);

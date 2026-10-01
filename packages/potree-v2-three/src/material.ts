@@ -1,6 +1,6 @@
 import { Color, ShaderMaterial, UniformsLib, UniformsUtils } from 'three';
 import { Vector2, Vector4 } from 'three';
-import type { DataTexture, Vector3, WebGLRenderer } from 'three';
+import type { ColorRepresentation, DataTexture, Vector3, WebGLRenderer } from 'three';
 import { ClipUniforms, clipVertex, clipVertexPars } from './clipping.js';
 import type { ClipCapacity, NodeClip } from './clipping.js';
 import type { OctreeNode } from './format.js';
@@ -8,6 +8,7 @@ import {
   classificationDefines, classificationVertex, classificationVertexPars, colorTypeAttribute, createGradientTexture,
   GRADIENT_SIZE, pointColorDefines, PotreeV2Classification, sampleGradient,
 } from './point-color.js';
+import { PotreeV2Gradients } from './point-color.js';
 import type { PotreeV2Gradient, PotreeV2PointColorType } from './point-color.js';
 import { PointSizeUniforms, pointSizeDefines, pointSizeVertexPars } from './point-size.js';
 import type { PointSizeSettings, PotreeV2PointSizeType, VisibleNodesTexture } from './point-size.js';
@@ -97,21 +98,48 @@ void main() {
   #include <fog_fragment>
 }`;
 
-/** @internal */
-export interface PointMaterialOptions {
-  size: number; shape: PotreeV2PointShape; sizeType: PotreeV2PointSizeType; minSize: number; maxSize: number;
+/** Initial settings of a PotreeV2PointMaterial, named as its properties. */
+export interface PotreeV2PointMaterialOptions {
+  /** CSS pixels for `fixed`, otherwise a factor of the spacing. Default: 2. */
+  size?: number;
+  /** Point sprite shape; also the area a pick hits. Default: `'square'`, as in Potree. */
+  shape?: PotreeV2PointShape;
+  /** How `size` becomes pixels. Default: `'fixed'`. */
+  sizeType?: PotreeV2PointSizeType;
+  /** Lower limit in CSS pixels for `attenuated` and `adaptive`. Default: 2, as in Potree. */
+  minSize?: number;
+  /** Upper limit in CSS pixels for `attenuated` and `adaptive`. Default: 50, as in Potree. */
+  maxSize?: number;
+  /**
+   * How points are colored. Its attribute is decoded even when the `attributes` option omits it.
+   * Default: `'rgb'` when rgb is decoded, otherwise `'elevation'`.
+   */
+  colorType?: PotreeV2PointColorType;
+  /** Color of every point for `solid`. Default: white. */
+  color?: ColorRepresentation;
+  /** Gradient of `elevation`. Default: PotreeV2Gradients.SPECTRAL, as in Potree. */
+  gradient?: PotreeV2Gradient;
+  /** metadata.json z range of `elevation`. Default: the bounding box's z range. */
+  elevationRange?: [number, number];
+  /** Intensity range of `intensity`. Default: the metadata's intensity min and max, otherwise 0 to 65535. */
+  intensityRange?: [number, number];
+  /** Exponent applied to the normalized intensity; below 1 brightens dark points. Default: 1. */
+  intensityGamma?: number;
+  /** Class colors and visibility; one scheme can be shared by several clouds. Default: a new one with Potree's colors. */
+  classification?: PotreeV2Classification;
+}
+
+/** What the cloud gives its material besides the public settings. @internal */
+export interface PointMaterialContext {
   spacing: number; visibleNodes: VisibleNodesTexture;
   /** Decoded attribute names; the color types that need a missing one cannot be selected. */
   attributes: readonly string[];
-  colorType: PotreeV2PointColorType;
   /** metadata.json z of the cloud's local origin, the bounding box minimum. */
   sourceOriginZ: number;
-  elevationRange: [number, number];
-  intensityRange: [number, number];
-  gradient: PotreeV2Gradient;
-  /** Shared scheme; when omitted, the material owns one with Potree's defaults. */
-  classification?: PotreeV2Classification;
 }
+
+type ResolvedMaterialOptions = PotreeV2PointMaterialOptions &
+  Required<Pick<PotreeV2PointMaterialOptions, 'colorType' | 'elevationRange' | 'intensityRange'>>;
 
 /**
  * Square or circular screen-space points of a Potree cloud, with per-node clip uniforms.
@@ -154,18 +182,22 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
   private readonly viewport = new Vector4();
 
   /** @internal */
-  constructor(options: PointMaterialOptions) {
+  constructor(options: ResolvedMaterialOptions, context: PointMaterialContext) {
     const clip = new ClipUniforms();
     const pointSize = new PointSizeUniforms();
-    assertColorType(options.colorType, options.attributes);
+    const shape = options.shape ?? 'square';
+    const sizeType = options.sizeType ?? 'fixed';
+    const gradient = options.gradient ?? PotreeV2Gradients.SPECTRAL;
+    assertColorType(options.colorType, context.attributes);
+    const gradientTexture = createGradientTexture(gradient);
+    // After the checks above, so that a rejected option leaves no texture of its own behind.
     const ownClassification = options.classification ? undefined : new PotreeV2Classification();
     const classification = options.classification ?? ownClassification!;
-    const gradientTexture = createGradientTexture(options.gradient);
     super({
       vertexShader, fragmentShader,
       uniforms: {
         ...UniformsUtils.merge([UniformsLib.fog]),
-        diffuse: { value: new Color(0xffffff) },
+        diffuse: { value: new Color(options.color ?? 0xffffff) },
         intensityRange: { value: new Vector2() },
         intensityGamma: { value: 1 },
         gradient: { value: gradientTexture },
@@ -176,26 +208,27 @@ export class PotreeV2PointMaterial extends ShaderMaterial {
         ...clip.uniforms,
       },
       defines: {
-        ...clip.defines, ...pointShapeDefines(options.shape), ...pointSizeDefines(options.sizeType),
-        ...pointColorDefines(options.colorType), ...classificationDefines(options.attributes.includes('classification')),
+        ...clip.defines, ...pointShapeDefines(shape), ...pointSizeDefines(sizeType),
+        ...pointColorDefines(options.colorType), ...classificationDefines(context.attributes.includes('classification')),
       },
       fog: true,
     });
     this.clip = clip;
     this.pointSize = pointSize;
-    this.spacing = options.spacing;
-    this.visibleNodes = options.visibleNodes;
-    this.size = options.size;
-    this.minSize = options.minSize;
-    this.maxSize = options.maxSize;
-    this.pointShape = options.shape;
-    this.pointSizeType = options.sizeType;
-    this.attributes = options.attributes;
+    this.spacing = context.spacing;
+    this.visibleNodes = context.visibleNodes;
+    this.size = options.size ?? 2;
+    this.minSize = options.minSize ?? 2;
+    this.maxSize = options.maxSize ?? 50;
+    this.pointShape = shape;
+    this.pointSizeType = sizeType;
+    this.attributes = context.attributes;
     this.pointColorType = options.colorType;
-    this.sourceOriginZ = options.sourceOriginZ;
+    this.sourceOriginZ = context.sourceOriginZ;
     this.elevationRange = [...options.elevationRange];
     this.intensityRange = [...options.intensityRange];
-    this.gradientStops = options.gradient;
+    this.intensityGamma = options.intensityGamma ?? 1;
+    this.gradientStops = gradient;
     this.gradientTexture = gradientTexture;
     this.classificationScheme = classification;
     this.ownClassification = ownClassification;

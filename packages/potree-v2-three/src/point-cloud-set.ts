@@ -2,7 +2,7 @@ import type { Camera, WebGLRenderer } from 'three';
 import { EncodedNodeCache } from './encoded-cache.js';
 import { LoadWaiters } from './load-waiters.js';
 import { cloudSets, LoadSlots, pickPointClouds, updatePointClouds, validViewportHeight } from './point-cloud.js';
-import type { PotreeV2PickOptions, PotreeV2PickResult, PotreeV2PointCloud } from './point-cloud.js';
+import type { PotreeV2PickOptions, PotreeV2PickResult, PotreeV2PointCloud, UpdateLimits } from './point-cloud.js';
 
 export interface PotreeV2PointCloudSetOptions {
   /** Maximum points selected for display per update, across all clouds. Default: 2,000,000. */
@@ -14,22 +14,21 @@ export interface PotreeV2PointCloudSetOptions {
   /** Maximum decoded nodes of all clouds installed as Three.js objects per update. Default: 8. */
   maxNodesToGPUPerFrame?: number;
   /**
-   * Byte limit for octree payloads before decoding, across the clouds whose own
-   * encodedCacheByteBudget is above 0 (BROTLI clouds by default). Default: 128 MiB.
+   * Byte limit for octree payloads before decoding, across the clouds whose
+   * cacheEncodedNodes is true (BROTLI URLs by default); 0 disables it. Default: 128 MiB.
    */
   encodedCacheByteBudget?: number;
 }
 
 /**
- * Point clouds that share one point budget, decoded and encoded caches, request limit and
- * per-frame installation limit, as Potree's global budget does. The largest projected nodes of
- * any cloud are selected, requested and installed first, and the least recently
- * displayed nodes of any cloud are evicted first. Each cloud's own pointBudget,
- * cachePointBudget, maxConcurrentLoads, maxNodesToGPUPerFrame and the size of its
- * encodedCacheByteBudget are ignored while it belongs to the set; add each cloud's `group`
- * to the scene as usual and call the set's `update()` once per frame. `pick()` tests the
- * clouds together, so a point behind another cloud's points is not hit. Decoder Workers
- * are shared by every cloud anyway.
+ * Selects, loads and evicts the nodes of its point clouds under one point budget, decoded and
+ * encoded caches, request limit and per-frame installation limit, as Potree's global budget
+ * does. Clouds own no such limits: even a single cloud is displayed through a set. The largest
+ * projected nodes of any cloud are selected, requested and installed first, and the least
+ * recently displayed nodes of any cloud are evicted first. Add each cloud's `group` to the
+ * scene as usual and call the set's `update()` once per frame. `pick()` tests the clouds
+ * together, so a point behind another cloud's points is not hit. Decoder Workers are shared
+ * by every cloud of any set.
  */
 export class PotreeV2PointCloudSet {
   pointBudget: number;
@@ -77,47 +76,58 @@ export class PotreeV2PointCloudSet {
   }
 
   /**
-   * A cloud belongs to at most one set; disposing it removes it. The encoded nodes it cached
-   * on its own are dropped, as are those it cached in the set when it is removed.
+   * A cloud belongs to at most one set; disposing it removes it. Its nodes stay as they are
+   * until the set's next update().
    */
   add(cloud: PotreeV2PointCloud): void {
     const owner = cloudSets.get(cloud);
     if (owner === this) return;
     if (owner) throw new Error('This point cloud already belongs to another PotreeV2PointCloudSet');
-    cloud.dropEncodedNodes(this.encodedCache);
     cloud.invalidateSelection();
     cloudSets.set(cloud, this);
     this.members.push(cloud);
     this.membershipChanged = true;
   }
 
+  /**
+   * Stop updating `cloud` and drop its encoded nodes from the set's cache. Its displayed nodes
+   * stay in its `group`, unchanged, until it is added to a set again.
+   */
   remove(cloud: PotreeV2PointCloud): boolean {
     const index = this.members.indexOf(cloud);
     if (index < 0) return false;
     this.members.splice(index, 1);
     cloudSets.delete(cloud);
-    cloud.dropEncodedNodes(this.encodedCache);
-    // Its last selection shared the set's budget; on its own it may select more.
+    this.encodedCache.deleteOwner(cloud);
+    // Its last selection used this set's budget; another set may select differently.
     cloud.invalidateSelection();
     this.membershipChanged = true;
     return true;
   }
 
   /**
-   * Recompute visible nodes of every cloud and start background loads. Call once per
-   * render frame. Returns true when any cloud's nodes, clipping or layers changed.
-   * After changing materials, request a render in the application.
+   * Recompute visible nodes of every cloud and start background loads. Call once per render
+   * frame. Returns true when any cloud's nodes, clipping or layers changed and should be
+   * rendered again. After changing materials (size, color, classification, etc.), request a
+   * render in the application. When the view, viewport and settings are unchanged and all
+   * loads have settled, the traversal is skipped. Node objects take the layers of their
+   * cloud's `group`. While a `group` or an ancestor is hidden, that cloud selects and loads nothing.
    */
   update(camera: Camera, viewportHeight: number): boolean {
     const force = this.membershipChanged;
     this.membershipChanged = false;
-    const changed = updatePointClouds(this.members, camera, viewportHeight, {
+    const changed = updatePointClouds(this.members, camera, viewportHeight, this.limits(), force);
+    if (validViewportHeight(viewportHeight) && !this.loading) this.loadWaiters.resolveAll();
+    return changed;
+  }
+
+  /** @internal */
+  limits(): UpdateLimits {
+    return {
       pointBudget: this.pointBudget, cachePointBudget: this.cachePointBudget,
       maxConcurrentLoads: this.maxConcurrentLoads, maxNodesToGPUPerFrame: this.maxNodesToGPUPerFrame,
       slots: this.slots,
-    }, force);
-    if (validViewportHeight(viewportHeight) && !this.loading) this.loadWaiters.resolveAll();
-    return changed;
+    };
   }
 
   /**
