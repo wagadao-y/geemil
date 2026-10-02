@@ -13,19 +13,19 @@
   }
 
   const buildings = $derived(
-    ws.bundle.nodes.filter((n) => n.kind === 'building' && ws.isNodeShown(n.id)),
+    ws.bundle.spaces.filter((n) => n.kind === 'building' && ws.isSpaceShown(n.id)),
   );
   const areas = $derived(
-    ws.bundle.nodes.filter(
-      (n) => n.kind === 'area' && ws.isNodeShown(n.id) && ws.layers.pointcloud,
+    ws.bundle.spaces.filter(
+      (n) => n.kind === 'area' && ws.isSpaceShown(n.id) && ws.layers.pointcloud,
     ),
   );
   const pins = $derived(
-    ws.layers.annotation ? ws.annotations.filter((a) => ws.isNodeShown(a.nodeId)) : [],
+    ws.layers.annotation ? ws.annotations.filter((a) => ws.isSpaceShown(a.spaceId)) : [],
   );
   const panos = $derived(
     ws.layers.panorama || ws.panoramaId
-      ? ws.bundle.panoramas.filter((p) => p.id !== ws.panoramaId && ws.isNodeShown(p.nodeId))
+      ? ws.bundle.panoramas.filter((p) => p.id !== ws.panoramaId && ws.isSpaceShown(p.spaceId))
       : [],
   );
   const measure = $derived.by(() => {
@@ -49,36 +49,36 @@
 
 <div class="labels">
   {#if !ws.panoramaId}
-    {#each buildings as node (node.id)}
+    {#each buildings as space (space.id)}
       <div
         class="anchor"
         {@attach anchor(
           ws.viewer,
-          center(node.bounds.min, node.bounds.max, node.bounds.max[2] + 3),
+          center(space.bounds.min, space.bounds.max, space.bounds.max[2] + 3),
           {
             minDistance: 90,
           },
         )}
       >
-        <button class="place" onclick={() => ws.focusNode(node.id)}>
+        <button class="place" onclick={() => ws.focusSpace(space.id)}>
           <Box size={14} />
-          {node.name}
+          {space.name}
         </button>
       </div>
     {/each}
-    {#each areas as node (node.id)}
+    {#each areas as space (space.id)}
       <div
         class="anchor"
         {@attach anchor(
           ws.viewer,
-          center(node.bounds.min, node.bounds.max, node.bounds.min[2] + 0.2),
+          center(space.bounds.min, space.bounds.max, space.bounds.min[2] + 0.2),
           {
             minDistance: 6,
             maxDistance: 75,
           },
         )}
       >
-        <button class="area" onclick={() => ws.focusNode(node.id)}>{node.name}</button>
+        <button class="area" onclick={() => ws.focusSpace(space.id)}>{space.name}</button>
       </div>
     {/each}
   {/if}

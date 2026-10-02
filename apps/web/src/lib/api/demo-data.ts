@@ -6,7 +6,7 @@ import type {
   SavedView,
   Site,
   SiteBundle,
-  SpaceNode,
+  Space,
   User,
   Vec3,
 } from '$lib/types';
@@ -29,7 +29,7 @@ function box(min: Vec3, max: Vec3): Box {
 
 /** Footprint and height of the buildings in the procedural outdoor mesh. */
 export interface DemoBuilding {
-  nodeId: string;
+  spaceId: string;
   min: [number, number];
   max: [number, number];
   /** Slab elevations of each floor, then the roof. */
@@ -39,21 +39,21 @@ export interface DemoBuilding {
 
 export const demoBuildings: DemoBuilding[] = [
   {
-    nodeId: 'n-turbine',
+    spaceId: 'sp-turbine',
     min: [-20, -10],
     max: [44, 30],
     levels: [0, 8, 15],
     color: '#c9ccc9',
   },
   {
-    nodeId: 'n-admin',
+    spaceId: 'sp-admin',
     min: [-82, -44],
     max: [-52, -24],
     levels: [0, 4, 8, 12],
     color: '#d6d3cb',
   },
   {
-    nodeId: 'n-utility',
+    spaceId: 'sp-utility',
     min: [52, -46],
     max: [80, -22],
     levels: [0, 8, 16],
@@ -61,9 +61,9 @@ export const demoBuildings: DemoBuilding[] = [
   },
 ];
 
-const nodes: SpaceNode[] = [
+const spaces: Space[] = [
   {
-    id: 'n-site',
+    id: 'sp-site',
     siteId: SITE,
     parentId: null,
     kind: 'site',
@@ -72,27 +72,27 @@ const nodes: SpaceNode[] = [
     bounds: box([-110, -80, -2], [110, 80, 40]),
   },
   {
-    id: 'n-outdoor',
+    id: 'sp-outdoor',
     siteId: SITE,
-    parentId: 'n-site',
+    parentId: 'sp-site',
     kind: 'outdoor',
     name: '屋外',
     order: 0,
     bounds: box([-110, -80, -2], [110, 80, 40]),
   },
   {
-    id: 'n-turbine',
+    id: 'sp-turbine',
     siteId: SITE,
-    parentId: 'n-site',
+    parentId: 'sp-site',
     kind: 'building',
     name: 'タービン建屋',
     order: 1,
     bounds: box([-20, -10, 0], [44, 30, 16]),
   },
   {
-    id: 'n-turbine-2f',
+    id: 'sp-turbine-2f',
     siteId: SITE,
-    parentId: 'n-turbine',
+    parentId: 'sp-turbine',
     kind: 'floor',
     name: '2F',
     order: 1,
@@ -100,18 +100,18 @@ const nodes: SpaceNode[] = [
     bounds: box([-20, -10, 8], [44, 30, 15]),
   },
   {
-    id: 'n-turbine-2f-control',
+    id: 'sp-turbine-2f-control',
     siteId: SITE,
-    parentId: 'n-turbine-2f',
+    parentId: 'sp-turbine-2f',
     kind: 'area',
     name: '制御盤エリア',
     order: 0,
     bounds: box([-16, 0, 8], [10, 22, 13]),
   },
   {
-    id: 'n-turbine-1f',
+    id: 'sp-turbine-1f',
     siteId: SITE,
-    parentId: 'n-turbine',
+    parentId: 'sp-turbine',
     kind: 'floor',
     name: '1F',
     order: 0,
@@ -119,36 +119,36 @@ const nodes: SpaceNode[] = [
     bounds: box([-20, -10, 0], [44, 30, 8]),
   },
   {
-    id: 'n-turbine-1f-pump',
+    id: 'sp-turbine-1f-pump',
     siteId: SITE,
-    parentId: 'n-turbine-1f',
+    parentId: 'sp-turbine-1f',
     kind: 'area',
     name: 'ポンプエリア',
     order: 0,
     bounds: box([10, -7, 0], [36, 12, 6]),
   },
   {
-    id: 'n-turbine-1f-elec',
+    id: 'sp-turbine-1f-elec',
     siteId: SITE,
-    parentId: 'n-turbine-1f',
+    parentId: 'sp-turbine-1f',
     kind: 'area',
     name: '電気室',
     order: 1,
     bounds: box([-17, 13, 0], [4, 27, 5]),
   },
   {
-    id: 'n-admin',
+    id: 'sp-admin',
     siteId: SITE,
-    parentId: 'n-site',
+    parentId: 'sp-site',
     kind: 'building',
     name: '管理棟',
     order: 2,
     bounds: box([-82, -44, 0], [-52, -24, 12]),
   },
-  ...['1F', '2F', '3F'].map((name, i): SpaceNode => ({
-    id: `n-admin-${i + 1}f`,
+  ...['1F', '2F', '3F'].map((name, i): Space => ({
+    id: `sp-admin-${i + 1}f`,
     siteId: SITE,
-    parentId: 'n-admin',
+    parentId: 'sp-admin',
     kind: 'floor',
     name,
     order: i,
@@ -156,9 +156,9 @@ const nodes: SpaceNode[] = [
     bounds: box([-82, -44, i * 4], [-52, -24, i * 4 + 4]),
   })),
   {
-    id: 'n-utility',
+    id: 'sp-utility',
     siteId: SITE,
-    parentId: 'n-site',
+    parentId: 'sp-site',
     kind: 'building',
     name: 'ユーティリティ棟',
     order: 3,
@@ -169,7 +169,7 @@ const nodes: SpaceNode[] = [
 const assets: Asset[] = [
   {
     id: 'a-drone-mesh',
-    nodeId: 'n-outdoor',
+    spaceId: 'sp-outdoor',
     kind: 'mesh',
     name: '敷地全体メッシュ',
     source: 'ドローン写真測量',
@@ -179,7 +179,7 @@ const assets: Asset[] = [
   },
   {
     id: 'a-pump-a',
-    nodeId: 'n-turbine-1f-pump',
+    spaceId: 'sp-turbine-1f-pump',
     kind: 'pointcloud',
     name: 'ポンプエリア 東側',
     source: 'SLAM スキャナ',
@@ -191,7 +191,7 @@ const assets: Asset[] = [
   },
   {
     id: 'a-pump-b',
-    nodeId: 'n-turbine-1f-pump',
+    spaceId: 'sp-turbine-1f-pump',
     kind: 'pointcloud',
     name: 'ポンプエリア 西側',
     source: 'SLAM スキャナ',
@@ -204,17 +204,17 @@ const assets: Asset[] = [
 ];
 
 const panoramas: Panorama[] = [
-  ['p-027', 'n-turbine-1f-pump', 'PANO-027', [12, 6, 1.6], 120],
-  ['p-028', 'n-turbine-1f-pump', 'PANO-028', [20.5, 3.8, 1.6], 200],
-  ['p-029', 'n-turbine-1f-pump', 'PANO-029', [26, 9.5, 1.6], 250],
-  ['p-030', 'n-turbine-1f-elec', 'PANO-030', [-6, 20, 1.6], 90],
-  ['p-031', 'n-turbine-2f-control', 'PANO-031', [-3, 11, 9.6], 0],
-  ['p-001', 'n-outdoor', 'PANO-001', [10, -30, 1.6], 0],
-  ['p-002', 'n-outdoor', 'PANO-002', [-45, 12, 1.6], 90],
-  ['p-003', 'n-outdoor', 'PANO-003', [-66, -14, 1.6], 180],
-].map(([id, nodeId, name, position, heading]) => ({
+  ['p-027', 'sp-turbine-1f-pump', 'PANO-027', [12, 6, 1.6], 120],
+  ['p-028', 'sp-turbine-1f-pump', 'PANO-028', [20.5, 3.8, 1.6], 200],
+  ['p-029', 'sp-turbine-1f-pump', 'PANO-029', [26, 9.5, 1.6], 250],
+  ['p-030', 'sp-turbine-1f-elec', 'PANO-030', [-6, 20, 1.6], 90],
+  ['p-031', 'sp-turbine-2f-control', 'PANO-031', [-3, 11, 9.6], 0],
+  ['p-001', 'sp-outdoor', 'PANO-001', [10, -30, 1.6], 0],
+  ['p-002', 'sp-outdoor', 'PANO-002', [-45, 12, 1.6], 90],
+  ['p-003', 'sp-outdoor', 'PANO-003', [-66, -14, 1.6], 180],
+].map(([id, spaceId, name, position, heading]) => ({
   id: id as string,
-  nodeId: nodeId as string,
+  spaceId: spaceId as string,
   name: name as string,
   position: position as Vec3,
   heading: heading as number,
@@ -228,7 +228,7 @@ const annotations: Annotation[] = [
   {
     id: 'an-p101a',
     siteId: SITE,
-    nodeId: 'n-turbine-1f-pump',
+    spaceId: 'sp-turbine-1f-pump',
     category: 'equipment',
     code: 'P-101A',
     title: '冷却水ポンプ A',
@@ -297,7 +297,7 @@ const annotations: Annotation[] = [
   {
     id: 'an-p101b',
     siteId: SITE,
-    nodeId: 'n-turbine-1f-pump',
+    spaceId: 'sp-turbine-1f-pump',
     category: 'equipment',
     code: 'P-101B',
     title: '冷却水ポンプ B',
@@ -327,7 +327,7 @@ const annotations: Annotation[] = [
   {
     id: 'an-insulation',
     siteId: SITE,
-    nodeId: 'n-turbine-1f-pump',
+    spaceId: 'sp-turbine-1f-pump',
     category: 'issue',
     title: '吐出配管の保温材が劣化',
     description: '保温材の外装が一部めくれている。雨水の侵入はなし。',
@@ -356,7 +356,7 @@ const annotations: Annotation[] = [
   {
     id: 'an-mcc1',
     siteId: SITE,
-    nodeId: 'n-turbine-1f-elec',
+    spaceId: 'sp-turbine-1f-elec',
     category: 'equipment',
     code: 'MCC-1',
     title: 'コントロールセンタ 1 号',
@@ -379,7 +379,7 @@ const annotations: Annotation[] = [
   {
     id: 'an-cp201',
     siteId: SITE,
-    nodeId: 'n-turbine-2f-control',
+    spaceId: 'sp-turbine-2f-control',
     category: 'equipment',
     code: 'CP-201',
     title: 'タービン制御盤',
@@ -395,7 +395,7 @@ const annotations: Annotation[] = [
   {
     id: 'an-t01',
     siteId: SITE,
-    nodeId: 'n-outdoor',
+    spaceId: 'sp-outdoor',
     category: 'equipment',
     code: 'T-01',
     title: '燃料タンク 1 号',
@@ -418,7 +418,7 @@ const annotations: Annotation[] = [
   {
     id: 'an-t02',
     siteId: SITE,
-    nodeId: 'n-outdoor',
+    spaceId: 'sp-outdoor',
     category: 'equipment',
     code: 'T-02',
     title: '燃料タンク 2 号',
@@ -434,7 +434,7 @@ const annotations: Annotation[] = [
   {
     id: 'an-muster',
     siteId: SITE,
-    nodeId: 'n-outdoor',
+    spaceId: 'sp-outdoor',
     category: 'note',
     title: '避難時の集合場所',
     description: '管理棟前の駐車場。点呼は各課の責任者が行う。',
@@ -454,7 +454,7 @@ const savedViews: SavedView[] = [
     siteId: SITE,
     name: '敷地全体',
     camera: { position: [-95, -150, 110], target: [0, 0, 0] },
-    hiddenNodeIds: [],
+    hiddenSpaceIds: [],
     floorFilter: null,
     createdBy: users.sato,
     createdAt: '2026-08-28T11:00:00+09:00',
@@ -464,8 +464,8 @@ const savedViews: SavedView[] = [
     siteId: SITE,
     name: '1F ポンプエリア 俯瞰',
     camera: { position: [6, -22, 18], target: [22, 2, 1] },
-    hiddenNodeIds: [],
-    floorFilter: 'n-turbine-1f',
+    hiddenSpaceIds: [],
+    floorFilter: 'sp-turbine-1f',
     createdBy: users.tanaka,
     createdAt: '2026-09-01T15:30:00+09:00',
   },
@@ -477,7 +477,7 @@ const site: Site = {
   address: '湾岸地区 3-1',
   crs: '施設ローカル',
   capturedAt: '2026-08-21',
-  stats: { nodes: nodes.length, annotations: annotations.length, panoramas: panoramas.length },
+  stats: { spaces: spaces.length, annotations: annotations.length, panoramas: panoramas.length },
 };
 
 export const demoSites: Site[] = [
@@ -488,10 +488,10 @@ export const demoSites: Site[] = [
     address: '北区 2-14',
     crs: '施設ローカル',
     capturedAt: '2026-06-02',
-    stats: { nodes: 0, annotations: 0, panoramas: 0 },
+    stats: { spaces: 0, annotations: 0, panoramas: 0 },
   },
 ];
 
 export function demoBundle(): SiteBundle {
-  return structuredClone({ site, nodes, assets, panoramas, annotations, savedViews });
+  return structuredClone({ site, spaces, assets, panoramas, annotations, savedViews });
 }

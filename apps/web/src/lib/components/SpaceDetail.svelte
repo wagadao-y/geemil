@@ -10,13 +10,13 @@
     ChevronRight,
     MessageSquare,
   } from '@lucide/svelte';
-  import type { SpaceNode } from '$lib/types';
+  import type { Space } from '$lib/types';
   import { useWorkspace } from '$lib/state/workspace.svelte';
   import PanelHeader from './PanelHeader.svelte';
-  import NodeIcon from './NodeIcon.svelte';
+  import SpaceIcon from './SpaceIcon.svelte';
   import CategoryIcon from './CategoryIcon.svelte';
 
-  let { node }: { node: SpaceNode } = $props();
+  let { space }: { space: Space } = $props();
   const ws = useWorkspace();
 
   const kindLabels = {
@@ -26,33 +26,33 @@
     floor: '階',
     area: 'エリア',
   };
-  const subtree = $derived(new Set([node.id, ...ws.descendants(node.id).map((n) => n.id)]));
-  const annotations = $derived(ws.annotations.filter((a) => subtree.has(a.nodeId)));
-  const panoramas = $derived(ws.bundle.panoramas.filter((p) => subtree.has(p.nodeId)));
-  const assets = $derived(ws.bundle.assets.filter((a) => subtree.has(a.nodeId)));
-  const children = $derived(ws.children.get(node.id) ?? []);
-  const hidden = $derived(ws.hiddenNodes.has(node.id));
-  const size = $derived(node.bounds.max.map((v, i) => v - node.bounds.min[i]));
+  const subtree = $derived(new Set([space.id, ...ws.descendants(space.id).map((n) => n.id)]));
+  const annotations = $derived(ws.annotations.filter((a) => subtree.has(a.spaceId)));
+  const panoramas = $derived(ws.bundle.panoramas.filter((p) => subtree.has(p.spaceId)));
+  const assets = $derived(ws.bundle.assets.filter((a) => subtree.has(a.spaceId)));
+  const children = $derived(ws.children.get(space.id) ?? []);
+  const hidden = $derived(ws.hiddenSpaces.has(space.id));
+  const size = $derived(space.bounds.max.map((v, i) => v - space.bounds.min[i]));
   const issues = $derived(annotations.filter((a) => a.category === 'issue').length);
 </script>
 
 <div class="panel">
-  <PanelHeader label={`選択中の${kindLabels[node.kind]}`} />
+  <PanelHeader label={`選択中の${kindLabels[space.kind]}`} />
 
   <div class="body scroll">
     <section class="hero">
       <div class="title">
-        <span class="icon"><NodeIcon kind={node.kind} size={20} /></span>
+        <span class="icon"><SpaceIcon kind={space.kind} size={20} /></span>
         <div>
-          <h1>{node.name}</h1>
-          <div class="path">{ws.pathLabel(node.parentId ?? '') || ws.root.name}</div>
+          <h1>{space.name}</h1>
+          <div class="path">{ws.pathLabel(space.parentId ?? '') || ws.root.name}</div>
         </div>
       </div>
       <div class="actions">
-        <button class="btn outline" onclick={() => ws.viewer?.frameBox(node.bounds)}>
+        <button class="btn outline" onclick={() => ws.viewer?.frameBox(space.bounds)}>
           <Crosshair size={15} /> フォーカス
         </button>
-        <button class="btn" onclick={() => ws.toggleNode(node.id)}>
+        <button class="btn" onclick={() => ws.toggleSpace(space.id)}>
           {#if hidden}<Eye size={15} /> 表示する{:else}<EyeOff size={15} /> 非表示にする{/if}
         </button>
       </div>
@@ -72,8 +72,8 @@
         <h2>構成</h2>
         <div class="list">
           {#each children as child (child.id)}
-            <button class="item" onclick={() => ws.focusNode(child.id)}>
-              <span class="item-icon"><NodeIcon kind={child.kind} size={14} /></span>
+            <button class="item" onclick={() => ws.focusSpace(child.id)}>
+              <span class="item-icon"><SpaceIcon kind={child.kind} size={14} /></span>
               <span class="item-name">{child.name}</span>
               <span class="item-meta">{ws.annotationsUnder(child.id).length} 件</span>
               <ChevronRight size={14} />

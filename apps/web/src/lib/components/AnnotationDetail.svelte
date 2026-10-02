@@ -168,9 +168,12 @@
 
       <section>
         <h2>位置</h2>
-        <button class="location" onclick={() => ws.focusNode(annotation.nodeId, { select: false })}>
+        <button
+          class="location"
+          onclick={() => ws.focusSpace(annotation.spaceId, { select: false })}
+        >
           <MapPin size={14} />
-          {ws.pathLabel(annotation.nodeId) || '敷地'}
+          {ws.pathLabel(annotation.spaceId) || '敷地'}
         </button>
         <div class="coords mono">
           X {annotation.position[0].toFixed(2)} · Y {annotation.position[1].toFixed(2)} · Z {annotation.position[2].toFixed(

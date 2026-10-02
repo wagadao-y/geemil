@@ -15,18 +15,18 @@ import {
   type Object3D,
 } from 'three';
 import type { DemoBuilding } from '$lib/api/demo-data';
-import type { SpaceNode } from '$lib/types';
+import type { Space } from '$lib/types';
 
 /**
  * Stand-in for the drone photogrammetry mesh of the demo site, built from boxes and cylinders.
  * Real sites load a glTF/3D Tiles mesh instead; the viewer only relies on the groups below.
  */
 export interface SiteModel {
-  /** Ground, roads, tanks and racks: the outdoor mesh of the `outdoor` node. */
+  /** Ground, roads, tanks and racks: the outdoor mesh of the `outdoor` space. */
   outdoor: Group;
-  /** Exterior shells of the buildings, by building node; one child group per level band. */
+  /** Exterior shells of the buildings, by building space; one child group per level band. */
   shells: Map<string, Group>;
-  /** Floor slabs and columns, by floor node; drawn with the indoor data. */
+  /** Floor slabs and columns, by floor space; drawn with the indoor data. */
   interiors: Map<string, Group>;
   /** Materials whose opacity follows the outdoor mesh opacity. */
   shellMaterials: MeshStandardMaterial[];
@@ -182,7 +182,7 @@ function buildOutdoor(materials: Material[]): Group {
 /** Splits a building's walls into one group per level band so floors above can be cut away. */
 function buildShell(building: DemoBuilding, material: MeshStandardMaterial): Group {
   const shell = new Group();
-  shell.name = `shell:${building.nodeId}`;
+  shell.name = `shell:${building.spaceId}`;
   const [x0, y0] = building.min;
   const [x1, y1] = building.max;
   const cx = (x0 + x1) / 2;
@@ -226,7 +226,7 @@ function buildShell(building: DemoBuilding, material: MeshStandardMaterial): Gro
   return shell;
 }
 
-function buildInterior(floor: SpaceNode, building: DemoBuilding): Group {
+function buildInterior(floor: Space, building: DemoBuilding): Group {
   const group = new Group();
   group.name = `interior:${floor.id}`;
   const slab = solid('#8d9296');
@@ -244,7 +244,7 @@ function buildInterior(floor: SpaceNode, building: DemoBuilding): Group {
   return group;
 }
 
-export function buildSiteModel(buildings: DemoBuilding[], nodes: SpaceNode[]): SiteModel {
+export function buildSiteModel(buildings: DemoBuilding[], spaces: Space[]): SiteModel {
   const materials: Material[] = [];
   const outdoor = buildOutdoor(materials);
   const shells = new Map<string, Group>();
@@ -254,8 +254,10 @@ export function buildSiteModel(buildings: DemoBuilding[], nodes: SpaceNode[]): S
   for (const building of buildings) {
     const material = solid(building.color);
     shellMaterials.push(material);
-    shells.set(building.nodeId, buildShell(building, material));
-    for (const floor of nodes.filter((n) => n.parentId === building.nodeId && n.kind === 'floor')) {
+    shells.set(building.spaceId, buildShell(building, material));
+    for (const floor of spaces.filter(
+      (n) => n.parentId === building.spaceId && n.kind === 'floor',
+    )) {
       interiors.set(floor.id, buildInterior(floor, building));
     }
   }

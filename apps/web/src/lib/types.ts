@@ -19,14 +19,14 @@ export interface Site {
   /** Latest capture date among the site's assets (ISO date). */
   capturedAt: string;
   thumbnail?: string;
-  stats: { nodes: number; annotations: number; panoramas: number };
+  stats: { spaces: number; annotations: number; panoramas: number };
 }
 
-/** Kind of a node in the facility hierarchy; only changes the icon and the default labels. */
+/** Kind of a space in the facility hierarchy; only changes the icon and the default labels. */
 export type SpaceKind = 'site' | 'outdoor' | 'building' | 'floor' | 'area';
 
-/** A node of the facility tree. The tree can be any depth. */
-export interface SpaceNode {
+/** A space of the facility tree. The tree can be any depth. */
+export interface Space {
   id: string;
   siteId: string;
   parentId: string | null;
@@ -34,7 +34,7 @@ export interface SpaceNode {
   name: string;
   /** Order among siblings. */
   order: number;
-  /** Extent in the site frame, used to fly to the node and to locate annotations. */
+  /** Extent in the site frame, used to fly to the space and to locate annotations. */
   bounds: Box;
   /** Floors only: the slab elevation, used to cut away the floors above. */
   elevation?: number;
@@ -42,10 +42,10 @@ export interface SpaceNode {
 
 export type AssetKind = 'mesh' | 'pointcloud';
 
-/** A 3D dataset attached to a node; hiding the node hides its assets. */
+/** A 3D dataset attached to a space; hiding the space hides its assets. */
 export interface Asset {
   id: string;
-  nodeId: string;
+  spaceId: string;
   kind: AssetKind;
   name: string;
   source: string;
@@ -61,7 +61,7 @@ export interface Asset {
 
 export interface Panorama {
   id: string;
-  nodeId: string;
+  spaceId: string;
   name: string;
   /** Camera center in the site frame. */
   position: Vec3;
@@ -111,7 +111,7 @@ export interface User {
 export interface Annotation {
   id: string;
   siteId: string;
-  nodeId: string;
+  spaceId: string;
   category: AnnotationCategory;
   /** Identifier in the linked systems, such as an equipment number. */
   code?: string;
@@ -138,7 +138,7 @@ export interface SavedView {
   siteId: string;
   name: string;
   camera: CameraState;
-  hiddenNodeIds: string[];
+  hiddenSpaceIds: string[];
   floorFilter: string | null;
   thumbnail?: string;
   createdBy: User;
@@ -147,7 +147,7 @@ export interface SavedView {
 
 export interface SiteBundle {
   site: Site;
-  nodes: SpaceNode[];
+  spaces: Space[];
   assets: Asset[];
   panoramas: Panorama[];
   annotations: Annotation[];

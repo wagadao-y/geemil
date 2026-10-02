@@ -39,11 +39,11 @@ import type { Box, CameraState, Panorama, SiteBundle, Vec3 } from '$lib/types';
 import { buildSiteModel, type SiteModel } from './site-model';
 
 export interface ViewerVisibility {
-  /** Nodes hidden directly or through an ancestor. */
+  /** Spaces hidden directly or through an ancestor. */
   hidden: ReadonlySet<string>;
   layers: { mesh: boolean; pointcloud: boolean; panorama: boolean; annotation: boolean };
   meshOpacity: number;
-  /** Floor node whose building is cut above it, or null. */
+  /** Floor space whose building is cut above it, or null. */
   floorFilter: string | null;
 }
 
@@ -110,14 +110,14 @@ export class Viewer {
   private readonly frameListeners = new Set<(info: FrameInfo) => void>();
   private readonly anchors = new Set<Anchor>();
   private readonly cloudsByAsset = new Map<string, PotreeV2PointCloud>();
-  private readonly assetNode = new Map<string, string>();
+  private readonly assetSpace = new Map<string, string>();
   private readonly highlight = new Group();
   private readonly measure = new Group();
   private model: SiteModel | null = null;
   private buildings: DemoBuilding[] = [];
-  private nodeParent = new Map<string, string | null>();
+  private spaceParent = new Map<string, string | null>();
   private floorElevation = new Map<string, number>();
-  private outdoorNodeId: string | null = null;
+  private outdoorSpaceId: string | null = null;
   private flight: Flight | null = null;
   private needsRender = true;
   private frameHandle = 0;
@@ -179,12 +179,12 @@ export class Viewer {
 
   async setSite(bundle: SiteBundle, buildings: DemoBuilding[]) {
     this.buildings = buildings;
-    this.nodeParent = new Map(bundle.nodes.map((n) => [n.id, n.parentId]));
-    this.outdoorNodeId = bundle.nodes.find((n) => n.kind === 'outdoor')?.id ?? null;
+    this.spaceParent = new Map(bundle.spaces.map((n) => [n.id, n.parentId]));
+    this.outdoorSpaceId = bundle.spaces.find((n) => n.kind === 'outdoor')?.id ?? null;
     this.floorElevation = new Map(
-      bundle.nodes.filter((n) => n.kind === 'floor').map((n) => [n.id, n.elevation ?? 0]),
+      bundle.spaces.filter((n) => n.kind === 'floor').map((n) => [n.id, n.elevation ?? 0]),
     );
-    this.model = buildSiteModel(buildings, bundle.nodes);
+    this.model = buildSiteModel(buildings, bundle.spaces);
     this.scene.add(this.model.outdoor, ...this.model.shells.values());
     // Only the wall faces, whose opacity the slider changes; edges and windows stay in the scene.
     const walls = new Set<unknown>(this.model.shellMaterials);
@@ -196,7 +196,7 @@ export class Viewer {
       });
     }
     for (const [floorId, interior] of this.model.interiors) {
-      interior.userData.nodeId = floorId;
+      interior.userData.spaceId = floorId;
       this.scene.add(interior);
     }
     if (this.visibility) this.applyVisibility(this.visibility);
@@ -216,7 +216,7 @@ export class Viewer {
           cloud.group.position.set(...asset.position);
           cloud.group.rotation.z = MathUtils.degToRad(asset.rotationZ);
           this.cloudsByAsset.set(asset.id, cloud);
-          this.assetNode.set(asset.id, asset.nodeId);
+          this.assetSpace.set(asset.id, asset.spaceId);
           this.clouds.add(cloud);
           this.scene.add(cloud.group);
           if (this.visibility) this.applyVisibility(this.visibility);
@@ -225,22 +225,22 @@ export class Viewer {
     );
   }
 
-  /** Floor index of a floor node within its building, for the floor filter. */
+  /** Floor index of a floor space within its building, for the floor filter. */
   private floorLevel(floorId: string): { buildingId: string; level: number } | null {
-    const buildingId = this.nodeParent.get(floorId);
-    const building = this.buildings.find((b) => b.nodeId === buildingId);
+    const buildingId = this.spaceParent.get(floorId);
+    const building = this.buildings.find((b) => b.spaceId === buildingId);
     const elevation = this.floorElevation.get(floorId);
     if (!building || !buildingId || elevation === undefined) return null;
     return { buildingId, level: Math.max(0, building.levels.indexOf(elevation)) };
   }
 
-  /** True when the floor filter cuts away the floor that contains a node. */
-  isCutAway(nodeId: string): boolean {
+  /** True when the floor filter cuts away the floor that contains a space. */
+  isCutAway(spaceId: string): boolean {
     const floorFilter = this.visibility?.floorFilter;
     const cut = floorFilter ? this.floorLevel(floorFilter) : null;
     if (!cut) return false;
     for (const floorId of this.floorElevation.keys()) {
-      if (this.ancestorIn(nodeId, floorId)) {
+      if (this.ancestorIn(spaceId, floorId)) {
         const level = this.floorLevel(floorId);
         return !!level && level.buildingId === cut.buildingId && level.level > cut.level;
       }
@@ -248,8 +248,8 @@ export class Viewer {
     return false;
   }
 
-  private ancestorIn(nodeId: string, id: string): boolean {
-    for (let n: string | null | undefined = nodeId; n; n = this.nodeParent.get(n)) {
+  private ancestorIn(spaceId: string, id: string): boolean {
+    for (let n: string | null | undefined = spaceId; n; n = this.spaceParent.get(n)) {
       if (n === id) return true;
     }
     return false;
@@ -261,7 +261,7 @@ export class Viewer {
     const cut = floorFilter ? this.floorLevel(floorFilter) : null;
     const model = this.model;
     if (model) {
-      const outdoorHidden = !!this.outdoorNodeId && hidden.has(this.outdoorNodeId);
+      const outdoorHidden = !!this.outdoorSpaceId && hidden.has(this.outdoorSpaceId);
       model.outdoor.visible = layers.mesh && !outdoorHidden;
       for (const material of model.shellMaterials) {
         material.opacity = meshOpacity;
@@ -281,8 +281,8 @@ export class Viewer {
       }
     }
     for (const [assetId, cloud] of this.cloudsByAsset) {
-      const nodeId = this.assetNode.get(assetId)!;
-      cloud.group.visible = layers.pointcloud && !hidden.has(nodeId) && !this.isCutAway(nodeId);
+      const spaceId = this.assetSpace.get(assetId)!;
+      cloud.group.visible = layers.pointcloud && !hidden.has(spaceId) && !this.isCutAway(spaceId);
     }
     this.needsRender = true;
   }

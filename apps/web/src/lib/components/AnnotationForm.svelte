@@ -21,8 +21,8 @@
   let saving = $state(false);
   const categories: AnnotationCategory[] = ['equipment', 'note', 'issue'];
 
-  const nodeOptions = $derived(
-    ws.bundle.nodes
+  const spaceOptions = $derived(
+    ws.bundle.spaces
       .filter((n) => n.parentId)
       .map((n) => ({ id: n.id, label: ws.pathLabel(n.id), depth: ws.path(n.id).length - 2 }))
       .sort((a, b) => a.label.localeCompare(b.label, 'ja')),
@@ -102,8 +102,8 @@
       <span>位置</span>
       <div class="where">
         <MapPin size={14} />
-        <select class="input" bind:value={annotation.nodeId} aria-label="所属する場所">
-          {#each nodeOptions as o (o.id)}
+        <select class="input" bind:value={annotation.spaceId} aria-label="所属する場所">
+          {#each spaceOptions as o (o.id)}
             <option value={o.id}>{o.label}</option>
           {/each}
         </select>

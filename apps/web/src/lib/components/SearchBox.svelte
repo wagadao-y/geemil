@@ -15,7 +15,7 @@
     title: string;
     code?: string;
     sub: string;
-    kind: 'annotation' | 'node' | 'panorama';
+    kind: 'annotation' | 'space' | 'panorama';
     category?: 'equipment' | 'note' | 'issue';
     run: () => void;
   }
@@ -29,19 +29,19 @@
     if (!q) return [];
     const hit = (...texts: (string | undefined)[]) => texts.some((t) => t && norm(t).includes(q));
     const annotations = ws.annotations
-      .filter((a) => hit(a.title, a.code, ws.pathLabel(a.nodeId)))
+      .filter((a) => hit(a.title, a.code, ws.pathLabel(a.spaceId)))
       .slice(0, 8)
       .map((a): Result => ({
         key: a.id,
         group: '注記・設備',
         title: a.title,
         code: a.code,
-        sub: ws.pathLabel(a.nodeId),
+        sub: ws.pathLabel(a.spaceId),
         kind: 'annotation',
         category: a.category,
         run: () => ws.selectAnnotation(a.id, { fly: true }),
       }));
-    const nodes = ws.bundle.nodes
+    const spaces = ws.bundle.spaces
       .filter((n) => n.parentId && hit(n.name, ws.pathLabel(n.id)))
       .slice(0, 6)
       .map((n): Result => ({
@@ -49,21 +49,21 @@
         group: '場所',
         title: n.name,
         sub: ws.pathLabel(n.id),
-        kind: 'node',
-        run: () => ws.focusNode(n.id),
+        kind: 'space',
+        run: () => ws.focusSpace(n.id),
       }));
     const panos = ws.bundle.panoramas
-      .filter((p) => hit(p.name, ws.pathLabel(p.nodeId)))
+      .filter((p) => hit(p.name, ws.pathLabel(p.spaceId)))
       .slice(0, 5)
       .map((p): Result => ({
         key: p.id,
         group: '360°写真',
         title: p.name,
-        sub: `${ws.pathLabel(p.nodeId)} · ${p.capturedAt}`,
+        sub: `${ws.pathLabel(p.spaceId)} · ${p.capturedAt}`,
         kind: 'panorama',
         run: () => void ws.openPanorama(p),
       }));
-    return [...annotations, ...nodes, ...panos];
+    return [...annotations, ...spaces, ...panos];
   });
 
   $effect(() => {

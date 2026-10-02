@@ -47,7 +47,7 @@
 
   $effect(() => {
     const a = ws.selectedAnnotation;
-    const shown = a && ws.layers.annotation && ws.isNodeShown(a.nodeId);
+    const shown = a && ws.layers.annotation && ws.isSpaceShown(a.spaceId);
     ws.viewer?.setHighlight(shown && a.extent ? a.extent : null);
   });
 
@@ -93,14 +93,14 @@
     if (point) ws.viewer.focusPoint(point, 14);
   }
 
-  const crumbs = $derived(ws.path(ws.focusNodeId));
+  const crumbs = $derived(ws.path(ws.focusSpaceId));
   const floors = $derived(
     ws.focusedBuilding
       ? (ws.children.get(ws.focusedBuilding.id) ?? []).filter((n) => n.kind === 'floor')
       : [],
   );
   const floorName = $derived(
-    ws.floorFilter ? (ws.nodesById.get(ws.floorFilter)?.name ?? '') : 'すべての階',
+    ws.floorFilter ? (ws.spacesById.get(ws.floorFilter)?.name ?? '') : 'すべての階',
   );
 
   const hints: Record<string, string> = {
@@ -111,13 +111,13 @@
 
 <div class="pane">
   <nav class="crumbs" aria-label="現在の場所">
-    {#each crumbs as node, i (node.id)}
+    {#each crumbs as space, i (space.id)}
       {#if i > 0}<ChevronRight size={14} />{/if}
       <button
         class:current={i === crumbs.length - 1}
-        onclick={() => (i === 0 ? ws.home() : ws.focusNode(node.id, { select: false }))}
+        onclick={() => (i === 0 ? ws.home() : ws.focusSpace(space.id, { select: false }))}
       >
-        {i === 0 ? '敷地' : node.name}
+        {i === 0 ? '敷地' : space.name}
       </button>
     {/each}
     {#if crumbs.length === 1}<ChevronRight size={14} /><span class="current">全体</span>{/if}
@@ -165,7 +165,7 @@
                 <button
                   class:active={ws.floorFilter === floor.id}
                   onclick={() => {
-                    ws.focusNode(floor.id, { select: false });
+                    ws.focusSpace(floor.id, { select: false });
                     floorMenu = false;
                   }}
                 >

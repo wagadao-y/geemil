@@ -38,10 +38,10 @@
     <div class="grid">
       {#each filtered as site (site.id)}
         <a class="card" href={`/sites/${site.id}`}>
-          <div class="thumb" class:empty={site.stats.nodes === 0}>
+          <div class="thumb" class:empty={site.stats.spaces === 0}>
             <svg viewBox="0 0 220 120" aria-hidden="true">
               <rect x="20" y="16" width="180" height="88" rx="6" fill="#3a4044" />
-              {#if site.stats.nodes > 0}
+              {#if site.stats.spaces > 0}
                 <rect x="88" y="34" width="56" height="36" fill="#a6aeb1" />
                 <rect x="40" y="70" width="28" height="18" fill="#c4c8c4" />
                 <rect x="150" y="72" width="26" height="22" fill="#98a0a2" />
@@ -50,7 +50,7 @@
                 <circle cx="116" cy="54" r="4" fill="#2dd4bf" stroke="#fff" stroke-width="1.5" />
               {/if}
             </svg>
-            {#if site.stats.nodes === 0}<span>3D データ未登録</span>{/if}
+            {#if site.stats.spaces === 0}<span>3D データ未登録</span>{/if}
           </div>
           <div class="info">
             <h2>{site.name}</h2>

@@ -27,7 +27,7 @@ export interface Api {
   deleteView(id: string): Promise<void>;
 }
 
-const STORAGE_KEY = 'spatial-hub.demo.v1';
+const STORAGE_KEY = 'spatial-hub.demo.v2';
 
 function newId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;

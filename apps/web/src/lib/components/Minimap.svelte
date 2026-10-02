@@ -26,17 +26,17 @@
   const unit = $derived(width / 220);
 
   const floorLabel = $derived(
-    ws.floorFilter ? ws.nodesById.get(ws.floorFilter)?.name : ws.focusedBuilding ? '全階' : null,
+    ws.floorFilter ? ws.spacesById.get(ws.floorFilter)?.name : ws.focusedBuilding ? '全階' : null,
   );
   const areas = $derived(
     ws.focusedBuilding
       ? ws
           .descendants(ws.focusedBuilding.id)
-          .filter((n) => n.kind === 'area' && ws.isNodeShown(n.id))
+          .filter((n) => n.kind === 'area' && ws.isSpaceShown(n.id))
       : [],
   );
   const panos = $derived(
-    ws.layers.panorama ? ws.bundle.panoramas.filter((p) => ws.isNodeShown(p.nodeId)) : [],
+    ws.layers.panorama ? ws.bundle.panoramas.filter((p) => ws.isSpaceShown(p.spaceId)) : [],
   );
 
   $effect(() => {
@@ -90,9 +90,9 @@
         <circle cx={-76} cy={-40} r={8} />
         <circle cx={-56} cy={-48} r={8} />
       </g>
-      {#each demoBuildings as b (b.nodeId)}
-        {@const hidden = !ws.isNodeShown(b.nodeId)}
-        {@const focused = ws.focusedBuilding?.id === b.nodeId}
+      {#each demoBuildings as b (b.spaceId)}
+        {@const hidden = !ws.isSpaceShown(b.spaceId)}
+        {@const focused = ws.focusedBuilding?.id === b.spaceId}
         <rect
           x={b.min[0]}
           y={-b.max[1]}

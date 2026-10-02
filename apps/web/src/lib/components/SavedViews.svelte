@@ -17,7 +17,7 @@
   function viewUrl(view: (typeof ws.savedViews)[number]) {
     const params = new URLSearchParams();
     params.set('cam', [...view.camera.position, ...view.camera.target].join(','));
-    if (view.hiddenNodeIds.length) params.set('hide', view.hiddenNodeIds.join(','));
+    if (view.hiddenSpaceIds.length) params.set('hide', view.hiddenSpaceIds.join(','));
     if (view.floorFilter) params.set('floor', view.floorFilter);
     return `${location.origin}${location.pathname}?${params}`;
   }

@@ -2,11 +2,11 @@
   import { useWorkspace } from '$lib/state/workspace.svelte';
   import AnnotationDetail from './AnnotationDetail.svelte';
   import AnnotationForm from './AnnotationForm.svelte';
-  import NodeDetail from './NodeDetail.svelte';
+  import SpaceDetail from './SpaceDetail.svelte';
 
   const ws = useWorkspace();
-  const node = $derived(
-    ws.selection?.type === 'node' ? ws.nodesById.get(ws.selection.id) : undefined,
+  const space = $derived(
+    ws.selection?.type === 'space' ? ws.spacesById.get(ws.selection.id) : undefined,
   );
 </script>
 
@@ -17,9 +17,9 @@
     {#key ws.selectedAnnotation.id}
       <AnnotationDetail annotation={ws.selectedAnnotation} />
     {/key}
-  {:else if node}
-    {#key node.id}
-      <NodeDetail {node} />
+  {:else if space}
+    {#key space.id}
+      <SpaceDetail {space} />
     {/key}
   {/if}
 </div>

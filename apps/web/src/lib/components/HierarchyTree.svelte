@@ -6,7 +6,7 @@
 </script>
 
 <div class="tree" role="tree" aria-label="施設構成">
-  <TreeItem node={ws.root} depth={0} />
+  <TreeItem space={ws.root} depth={0} />
 </div>
 
 <style>

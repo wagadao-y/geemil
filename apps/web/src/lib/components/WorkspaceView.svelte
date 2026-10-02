@@ -23,11 +23,11 @@
     const params = new URLSearchParams(location.search);
     const cam = params.get('cam')?.split(',').map(Number);
     const hide = params.get('hide')?.split(',').filter(Boolean) ?? [];
-    for (const id of hide) ws.hiddenNodes.add(id);
+    for (const id of hide) ws.hiddenSpaces.add(id);
     const floor = params.get('floor');
-    if (floor && ws.nodesById.has(floor)) {
+    if (floor && ws.spacesById.has(floor)) {
       ws.floorFilter = floor;
-      ws.focusNodeId = floor;
+      ws.focusSpaceId = floor;
     }
     if (cam?.length === 6 && cam.every(Number.isFinite)) {
       void ws.viewer?.flyTo(

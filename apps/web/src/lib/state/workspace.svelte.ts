@@ -8,7 +8,7 @@ import type {
   Panorama,
   SavedView,
   SiteBundle,
-  SpaceNode,
+  Space,
   Vec3,
 } from '$lib/types';
 import type { Viewer } from '$lib/viewer/viewer';
@@ -16,7 +16,7 @@ import type { Viewer } from '$lib/viewer/viewer';
 export type Tool = 'select' | 'measure' | 'annotate';
 
 export type Selection =
-  { type: 'annotation'; id: string } | { type: 'node'; id: string } | { type: 'draft' };
+  { type: 'annotation'; id: string } | { type: 'space'; id: string } | { type: 'draft' };
 
 export interface Toast {
   id: number;
@@ -30,8 +30,8 @@ export const categoryLabels: Record<AnnotationCategory, string> = {
   issue: '要対応',
 };
 
-function contains(node: SpaceNode, p: Vec3): boolean {
-  const { min, max } = node.bounds;
+function contains(space: Space, p: Vec3): boolean {
+  const { min, max } = space.bounds;
   return p.every((v, i) => v >= min[i] - 0.01 && v <= max[i] + 0.01);
 }
 
@@ -43,15 +43,15 @@ export class Workspace {
   annotations = $state<Annotation[]>([]);
   savedViews = $state<SavedView[]>([]);
 
-  readonly hiddenNodes = new SvelteSet<string>();
+  readonly hiddenSpaces = new SvelteSet<string>();
   readonly expanded = new SvelteSet<string>();
   layers = $state({ mesh: true, pointcloud: true, panorama: true, annotation: true });
   meshOpacity = $state(0.7);
   floorFilter = $state<string | null>(null);
 
   selection = $state<Selection | null>(null);
-  /** Node the breadcrumb points at: the last node or annotation location flown to. */
-  focusNodeId = $state<string>('');
+  /** Space the breadcrumb points at: the last space or annotation location flown to. */
+  focusSpaceId = $state<string>('');
   tool = $state<Tool>('select');
   panoramaId = $state<string | null>(null);
   draft = $state<Annotation | null>(null);
@@ -60,76 +60,76 @@ export class Workspace {
   showLeft = $state(true);
   toasts = $state<Toast[]>([]);
 
-  readonly nodesById: Map<string, SpaceNode>;
-  readonly children: Map<string | null, SpaceNode[]>;
-  readonly root: SpaceNode;
+  readonly spacesById: Map<string, Space>;
+  readonly children: Map<string | null, Space[]>;
+  readonly root: Space;
 
   constructor(bundle: SiteBundle) {
     this.bundle = bundle;
     this.annotations = bundle.annotations;
     this.savedViews = bundle.savedViews;
-    this.nodesById = new Map(bundle.nodes.map((n) => [n.id, n]));
+    this.spacesById = new Map(bundle.spaces.map((n) => [n.id, n]));
     this.children = new Map();
-    for (const node of [...bundle.nodes].sort((a, b) => a.order - b.order)) {
-      const list = this.children.get(node.parentId) ?? [];
-      list.push(node);
-      this.children.set(node.parentId, list);
+    for (const space of [...bundle.spaces].sort((a, b) => a.order - b.order)) {
+      const list = this.children.get(space.parentId) ?? [];
+      list.push(space);
+      this.children.set(space.parentId, list);
     }
     this.root = this.children.get(null)![0];
-    this.focusNodeId = this.root.id;
+    this.focusSpaceId = this.root.id;
     this.expanded.add(this.root.id);
   }
 
   // ------------------------------------------------------------ hierarchy
 
-  /** Hidden nodes including the descendants of hidden nodes. */
+  /** Hidden spaces including the descendants of hidden spaces. */
   effectiveHidden = $derived.by(() => {
     const hidden = new Set<string>();
-    const walk = (node: SpaceNode, parentHidden: boolean) => {
-      const isHidden = parentHidden || this.hiddenNodes.has(node.id);
-      if (isHidden) hidden.add(node.id);
-      for (const child of this.children.get(node.id) ?? []) walk(child, isHidden);
+    const walk = (space: Space, parentHidden: boolean) => {
+      const isHidden = parentHidden || this.hiddenSpaces.has(space.id);
+      if (isHidden) hidden.add(space.id);
+      for (const child of this.children.get(space.id) ?? []) walk(child, isHidden);
     };
     walk(this.root, false);
     return hidden;
   });
 
-  path(nodeId: string): SpaceNode[] {
-    const path: SpaceNode[] = [];
+  path(spaceId: string): Space[] {
+    const path: Space[] = [];
     for (
-      let n = this.nodesById.get(nodeId);
+      let n = this.spacesById.get(spaceId);
       n;
-      n = n.parentId ? this.nodesById.get(n.parentId) : undefined
+      n = n.parentId ? this.spacesById.get(n.parentId) : undefined
     ) {
       path.unshift(n);
     }
     return path;
   }
 
-  pathLabel(nodeId: string): string {
-    return this.path(nodeId)
+  pathLabel(spaceId: string): string {
+    return this.path(spaceId)
       .slice(1)
       .map((n) => n.name)
       .join(' / ');
   }
 
-  descendants(nodeId: string): SpaceNode[] {
-    const out: SpaceNode[] = [];
+  descendants(spaceId: string): Space[] {
+    const out: Space[] = [];
     const walk = (id: string) => {
       for (const child of this.children.get(id) ?? []) {
         out.push(child);
         walk(child.id);
       }
     };
-    walk(nodeId);
+    walk(spaceId);
     return out;
   }
 
-  /** The deepest node whose bounds contain the point, preferring indoor nodes. */
-  nodeAt(p: Vec3): SpaceNode {
+  /** The deepest space whose bounds contain the point, preferring indoor spaces. */
+  spaceAt(p: Vec3): Space {
     let best = this.root;
-    const visit = (node: SpaceNode, depth: number, bestDepth: { d: number }) => {
-      for (const child of this.children.get(node.id) ?? []) {
+    const visit = (space: Space, depth: number, bestDepth: { d: number }) => {
+      for (const child of this.children.get(space.id) ?? []) {
         if (child.kind === 'outdoor') continue;
         if (contains(child, p)) {
           if (depth + 1 > bestDepth.d) {
@@ -147,60 +147,60 @@ export class Workspace {
     return best;
   }
 
-  /** True when the floor filter cuts away the floor that contains a node. */
-  isCutAway(nodeId: string): boolean {
-    const cut = this.floorFilter ? this.nodesById.get(this.floorFilter) : undefined;
+  /** True when the floor filter cuts away the floor that contains a space. */
+  isCutAway(spaceId: string): boolean {
+    const cut = this.floorFilter ? this.spacesById.get(this.floorFilter) : undefined;
     if (!cut) return false;
-    const floor = this.path(nodeId).find((n) => n.kind === 'floor');
+    const floor = this.path(spaceId).find((n) => n.kind === 'floor');
     return (
       !!floor && floor.parentId === cut.parentId && (floor.elevation ?? 0) > (cut.elevation ?? 0)
     );
   }
 
   /** Visible in the 3D view: not hidden, not cut by the floor filter. */
-  isNodeShown(nodeId: string): boolean {
-    return !this.effectiveHidden.has(nodeId) && !this.isCutAway(nodeId);
+  isSpaceShown(spaceId: string): boolean {
+    return !this.effectiveHidden.has(spaceId) && !this.isCutAway(spaceId);
   }
 
-  toggleNode(nodeId: string) {
-    if (this.hiddenNodes.has(nodeId)) this.hiddenNodes.delete(nodeId);
-    else this.hiddenNodes.add(nodeId);
+  toggleSpace(spaceId: string) {
+    if (this.hiddenSpaces.has(spaceId)) this.hiddenSpaces.delete(spaceId);
+    else this.hiddenSpaces.add(spaceId);
   }
 
-  /** Floors of the building that contains the focused node, for the floor switcher. */
+  /** Floors of the building that contains the focused space, for the floor switcher. */
   focusedBuilding = $derived.by(() => {
-    const path = this.path(this.focusNodeId);
+    const path = this.path(this.focusSpaceId);
     return path.find((n) => n.kind === 'building') ?? null;
   });
 
   // ------------------------------------------------------------ navigation
 
-  focusNode(nodeId: string, options: { select?: boolean } = {}) {
-    const node = this.nodesById.get(nodeId);
-    if (!node) return;
-    this.focusNodeId = nodeId;
-    for (const n of this.path(nodeId).slice(0, -1)) this.expanded.add(n.id);
+  focusSpace(spaceId: string, options: { select?: boolean } = {}) {
+    const space = this.spacesById.get(spaceId);
+    if (!space) return;
+    this.focusSpaceId = spaceId;
+    for (const n of this.path(spaceId).slice(0, -1)) this.expanded.add(n.id);
     if (options.select !== false)
-      this.selection = node.parentId ? { type: 'node', id: nodeId } : null;
+      this.selection = space.parentId ? { type: 'space', id: spaceId } : null;
     // Entering a floor cuts the building above it; leaving the building clears the cut.
-    if (node.kind === 'floor') this.floorFilter = node.id;
+    if (space.kind === 'floor') this.floorFilter = space.id;
     else {
-      const floor = this.path(nodeId).find((n) => n.kind === 'floor');
+      const floor = this.path(spaceId).find((n) => n.kind === 'floor');
       this.floorFilter = floor?.id ?? null;
     }
     if (this.panoramaId) void this.closePanorama(false);
-    void this.viewer?.frameBox(node.bounds);
+    void this.viewer?.frameBox(space.bounds);
   }
 
   selectAnnotation(id: string, options: { fly?: boolean } = {}) {
     const annotation = this.annotations.find((a) => a.id === id);
     if (!annotation) return;
     this.selection = { type: 'annotation', id };
-    this.focusNodeId = annotation.nodeId;
-    for (const n of this.path(annotation.nodeId)) this.expanded.add(n.id);
+    this.focusSpaceId = annotation.spaceId;
+    for (const n of this.path(annotation.spaceId)) this.expanded.add(n.id);
     // Flying to an indoor annotation cuts the floors above it, as entering its floor does.
-    const floor = this.path(annotation.nodeId).find((n) => n.kind === 'floor');
-    if (floor && (options.fly || this.isCutAway(annotation.nodeId))) this.floorFilter = floor.id;
+    const floor = this.path(annotation.spaceId).find((n) => n.kind === 'floor');
+    if (floor && (options.fly || this.isCutAway(annotation.spaceId))) this.floorFilter = floor.id;
     if (options.fly && !this.panoramaId) {
       if (annotation.extent) {
         void this.viewer?.frameBox(annotation.extent);
@@ -223,7 +223,7 @@ export class Workspace {
   });
 
   home() {
-    this.focusNodeId = this.root.id;
+    this.focusSpaceId = this.root.id;
     this.floorFilter = null;
     void this.viewer?.flyTo({ position: [-95, -150, 110], target: [0, 0, 0] }, 900);
   }
@@ -237,7 +237,7 @@ export class Workspace {
   /** Panoramas near the given one, in capture order, for the film strip. */
   panoramasNear(pano: Panorama): Panorama[] {
     return this.bundle.panoramas
-      .filter((p) => p.nodeId === pano.nodeId || p.id === pano.id)
+      .filter((p) => p.spaceId === pano.spaceId || p.id === pano.id)
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -256,11 +256,11 @@ export class Workspace {
 
   async openPanorama(pano: Panorama, lookAt?: Vec3) {
     this.panoramaId = pano.id;
-    this.focusNodeId = pano.nodeId;
-    for (const n of this.path(pano.nodeId).slice(0, -1)) this.expanded.add(n.id);
+    this.focusSpaceId = pano.spaceId;
+    for (const n of this.path(pano.spaceId).slice(0, -1)) this.expanded.add(n.id);
     this.tool = 'select';
     this.measurePoints = [];
-    const floor = this.path(pano.nodeId).find((n) => n.kind === 'floor');
+    const floor = this.path(pano.spaceId).find((n) => n.kind === 'floor');
     if (floor) this.floorFilter = floor.id;
     let heading = pano.heading;
     if (lookAt) {
@@ -279,19 +279,19 @@ export class Workspace {
   // ------------------------------------------------------------ annotations
 
   startDraft(position: Vec3) {
-    const node = this.nodeAt(position);
+    const space = this.spaceAt(position);
     const now = new Date().toISOString();
     this.tool = 'select';
     if (this.draft && this.selection?.type === 'draft') {
       // Picking again while the form is open moves the pin and keeps what was typed.
       this.draft.position = position;
-      this.draft.nodeId = node.id;
+      this.draft.spaceId = space.id;
       return;
     }
     this.draft = {
       id: newId('an'),
       siteId: this.bundle.site.id,
-      nodeId: node.id,
+      spaceId: space.id,
       category: 'note',
       title: '',
       description: '',
@@ -313,7 +313,7 @@ export class Workspace {
     this.annotations.push(saved);
     this.draft = null;
     this.selection = { type: 'annotation', id: saved.id };
-    for (const n of this.path(saved.nodeId)) this.expanded.add(n.id);
+    for (const n of this.path(saved.spaceId)) this.expanded.add(n.id);
     this.toast('注記を追加しました', 'success');
   }
 
@@ -334,28 +334,28 @@ export class Workspace {
     if (index >= 0) this.annotations[index] = annotation;
   }
 
-  annotationsUnder(nodeId: string): Annotation[] {
-    const ids = new Set([nodeId, ...this.descendants(nodeId).map((n) => n.id)]);
-    return this.annotations.filter((a) => ids.has(a.nodeId));
+  annotationsUnder(spaceId: string): Annotation[] {
+    const ids = new Set([spaceId, ...this.descendants(spaceId).map((n) => n.id)]);
+    return this.annotations.filter((a) => ids.has(a.spaceId));
   }
 
   // ------------------------------------------------------------ views
 
-  currentView(): { camera: CameraState; hiddenNodeIds: string[]; floorFilter: string | null } {
+  currentView(): { camera: CameraState; hiddenSpaceIds: string[]; floorFilter: string | null } {
     return {
       camera: this.viewer?.getCamera() ?? { position: [0, 0, 100], target: [0, 0, 0] },
-      hiddenNodeIds: [...this.hiddenNodes],
+      hiddenSpaceIds: [...this.hiddenSpaces],
       floorFilter: this.floorFilter,
     };
   }
 
-  applyView(view: Pick<SavedView, 'camera' | 'hiddenNodeIds' | 'floorFilter'>) {
+  applyView(view: Pick<SavedView, 'camera' | 'hiddenSpaceIds' | 'floorFilter'>) {
     if (this.panoramaId) void this.closePanorama(false);
-    this.hiddenNodes.clear();
-    for (const id of view.hiddenNodeIds) this.hiddenNodes.add(id);
+    this.hiddenSpaces.clear();
+    for (const id of view.hiddenSpaceIds) this.hiddenSpaces.add(id);
     this.floorFilter = view.floorFilter;
-    if (view.floorFilter) this.focusNodeId = view.floorFilter;
-    else this.focusNodeId = this.root.id;
+    if (view.floorFilter) this.focusSpaceId = view.floorFilter;
+    else this.focusSpaceId = this.root.id;
     void this.viewer?.flyTo(view.camera, 900);
   }
 
@@ -384,7 +384,7 @@ export class Workspace {
     const view = this.currentView();
     const params = new URLSearchParams();
     params.set('cam', [...view.camera.position, ...view.camera.target].join(','));
-    if (view.hiddenNodeIds.length) params.set('hide', view.hiddenNodeIds.join(','));
+    if (view.hiddenSpaceIds.length) params.set('hide', view.hiddenSpaceIds.join(','));
     if (view.floorFilter) params.set('floor', view.floorFilter);
     if (this.selection?.type === 'annotation') params.set('a', this.selection.id);
     if (this.panoramaId) params.set('pano', this.panoramaId);
